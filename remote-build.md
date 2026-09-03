@@ -60,17 +60,22 @@ Timing: ~2 min to early failure, ~15-30 min full build.
 
 ## CURRENT STATE  (update this every cycle)
 
-- HEAD on fork `main`: **74ff125a**
-  "build: don't abort when actool emits no AppIcon.icns".
-- Build **IN PROGRESS**: run **33785347549** —
-  https://github.com/tsang/omlx/actions/runs/33785347549
-  Monitoring in background shell id **041** (`./watch-actions.sh tsang/omlx 45`).
-- CI test run (auto, push trigger) in progress: 33785355767 (expected pass).
-- If run 33785347549 turns GREEN: artifact `oMLX-app-<sha>` is the product
-  (zip + sha256). Update this section to GREEN, record artifact name+size.
-- If it FAILS again: `gh run view 33785347549 --repo tsang/omlx --log-failed`
-  (plus download `xcodebuild-log-<sha>`), add a row to the failure table
-  below, fix, re-push, re-dispatch, restart the monitor.
+- **GREEN** — run **33785347549** succeeded end to end
+  (https://github.com/tsang/omlx/actions/runs/33785347549), including the
+  embedded-Python smoke test.
+- Artifact: `oMLX-app-<sha>` — `oMLX-app-74ff125a…` **~486 MB**
+  (zip + sha256). Download:
+  `gh run download 33785347549 --repo tsang/omlx --name oMLX-app-74ff125a8914ed7c149a51ebdb331cf751285306`
+  (then unzip; ad-hoc signed → right-click Open once or `xattr -dr
+  com.apple.quarantine oMLX.app`).
+- HEAD on fork `main`: **7ee9dc48** (docs); app build ran at `74ff125a`.
+- No build in progress. Monitor shells idle.
+- Next failure: `gh run view <run-id> --repo tsang/omlx --log-failed`
+  (+ download `xcodebuild-log-<sha>` artifact), add a row to the failure
+  table below, fix, re-push, re-dispatch, restart the monitor.
+- Known cosmetic issue: `./watch-actions.sh` reports FAILED if ANY historical
+  run failed, even when the newest succeeded. Judge from the newest run's
+  line or `gh run view <id>` directly.
 
 ### Failure history + fixes
 
@@ -78,6 +83,7 @@ Timing: ~2 min to early failure, ~15-30 min full build.
 |-----|--------------|-----------|-----|
 | 33774786542 | Swift compile (arm64+x86_64) | runner default Xcode 16.x lacks macOS 26 SDK; `build.sh` hid the real error (tee + tail-40) | workflow: select newest Xcode (`sort -V`), inline `PYTHON_BIN`, dump+upload `xcodebuild.log` |
 | 33781349766 | post-compile staging | Xcode 26.3 `actool` exits 0 but emits no `AppIcon.icns` for the Tahoe `.icon`; unconditional `cp` aborted the run | `build.sh`: guard icon `cp` + Info.plist patch on the artifacts existing; else warn + ship legacy icon (fork commit 74ff125a) |
+| 33785347549 | — | **success** with both fixes | artifact `oMLX-app-74ff125a…` |
 
 ### Remaining risk (what could still fail)
 
