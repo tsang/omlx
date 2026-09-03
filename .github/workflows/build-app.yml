@@ -31,12 +31,16 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Select full Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app
+      - name: Select newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Selecting $XCODE"
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        id: python
         with:
           python-version: "3.11"
 
@@ -45,14 +49,34 @@ jobs:
 
       - name: Build app bundle
         env:
-          PYTHON_BIN: ${{ steps.python.outputs.executable }}
           MACOSX_DEPLOYMENT_TARGET: "15.0"
         run: |
+          PYTHON_BIN="$(command -v python3)"
+          export PYTHON_BIN
           ARGS=("${{ inputs.configuration }}")
           if [ "${{ inputs.custom_kernels }}" = "true" ]; then
             ARGS+=("--with-custom-kernel")
           fi
           apps/omlx-mac/Scripts/build.sh "${ARGS[@]}"
+
+      - name: Dump build diagnostics on failure
+        if: failure()
+        run: |
+          LOG=apps/omlx-mac/build/xcodebuild.log
+          if [ -f "$LOG" ]; then
+            echo "=== xcodebuild.log errors ==="
+            grep -nE "error:|failed with a nonzero exit code|BUILD FAILED" "$LOG" | tail -120 || true
+          else
+            echo "no xcodebuild.log found"
+          fi
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: xcodebuild-log-${{ github.sha }}
+          path: apps/omlx-mac/build/xcodebuild.log
+          if-no-files-found: ignore
 
       - name: Smoke test (embedded python via app wrappers)
         run: |
