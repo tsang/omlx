@@ -670,6 +670,7 @@ if [ -d "$ICON_BUNDLE" ] && [ -d "$XCASSETS_DIR" ]; then
     log "Compiling AppIcon.icon via actool…"
     ACTOOL=/Applications/Xcode.app/Contents/Developer/usr/bin/actool
     ICON_TMP=$(mktemp -d)
+    ICON_LOG="$BUILD_DIR/actool-icon.log"
     if "$ACTOOL" \
             "$XCASSETS_DIR" \
             "$ICON_BUNDLE" \
@@ -681,20 +682,29 @@ if [ -d "$ICON_BUNDLE" ] && [ -d "$XCASSETS_DIR" ]; then
             --bundle-identifier app.omlx \
             --output-format human-readable-text \
             --output-partial-info-plist "$ICON_TMP/icon.plist" \
-            >/dev/null 2>&1; then
-        cp "$ICON_TMP/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
-        cp "$ICON_TMP/Assets.car"   "$RESOURCES_DIR/Assets.car"
-        /usr/libexec/PlistBuddy \
-            -c "Delete :CFBundleIconName" "$INFO_PLIST" 2>/dev/null || true
-        /usr/libexec/PlistBuddy \
-            -c "Add :CFBundleIconName string AppIcon" "$INFO_PLIST"
-        /usr/libexec/PlistBuddy \
-            -c "Delete :CFBundleIconFile" "$INFO_PLIST" 2>/dev/null || true
-        /usr/libexec/PlistBuddy \
-            -c "Add :CFBundleIconFile string AppIcon" "$INFO_PLIST"
-        ok "  + AppIcon.icns + Assets.car (Tahoe icon-composer)"
+            >"$ICON_LOG" 2>&1; then
+        # actool can exit 0 without emitting an .icns (older Xcode has no
+        # icon-composer output for .icon inputs). Only stage + patch Info.plist
+        # when the artifacts actually exist; otherwise keep the legacy icon.
+        if [ -f "$ICON_TMP/AppIcon.icns" ] && [ -f "$ICON_TMP/Assets.car" ]; then
+            cp "$ICON_TMP/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
+            cp "$ICON_TMP/Assets.car"   "$RESOURCES_DIR/Assets.car"
+            /usr/libexec/PlistBuddy \
+                -c "Delete :CFBundleIconName" "$INFO_PLIST" 2>/dev/null || true
+            /usr/libexec/PlistBuddy \
+                -c "Add :CFBundleIconName string AppIcon" "$INFO_PLIST"
+            /usr/libexec/PlistBuddy \
+                -c "Delete :CFBundleIconFile" "$INFO_PLIST" 2>/dev/null || true
+            /usr/libexec/PlistBuddy \
+                -c "Add :CFBundleIconFile string AppIcon" "$INFO_PLIST"
+            ok "  + AppIcon.icns + Assets.car (Tahoe icon-composer)"
+        else
+            warn "actool exited 0 but produced no AppIcon.icns (Xcode $(xcodebuild -version 2>/dev/null | tail -1)); bundle ships legacy icon"
+            tail -20 "$ICON_LOG" >&2 || true
+        fi
     else
         warn "actool merge of AppIcon.icon failed; bundle ships legacy icon"
+        tail -20 "$ICON_LOG" >&2 || true
     fi
     rm -rf "$ICON_TMP"
 fi
