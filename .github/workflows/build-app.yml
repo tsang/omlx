@@ -1,0 +1,76 @@
+name: Build macOS app
+
+# The upstream repo builds oMLX.app on an off-tree maintainer pipeline
+# (packaging/README.md), not in CI. This workflow builds the Swift app +
+# embedded venvstacks Python layers on a hosted macOS runner and uploads
+# the staged .app as an artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      custom_kernels:
+        description: Build with native custom kernels (GLM-5.2 / MiniMax M3 / Qwen3.5)
+        type: boolean
+        default: false
+      configuration:
+        description: Xcode build configuration
+        type: choice
+        default: release
+        options: [release, debug]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-app:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Select full Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        id: python
+        with:
+          python-version: "3.11"
+
+      - name: Install venvstacks
+        run: python -m pip install --upgrade pip "venvstacks>=0.7.0"
+
+      - name: Build app bundle
+        env:
+          PYTHON_BIN: ${{ steps.python.outputs.executable }}
+          MACOSX_DEPLOYMENT_TARGET: "15.0"
+        run: |
+          ARGS=("${{ inputs.configuration }}")
+          if [ "${{ inputs.custom_kernels }}" = "true" ]; then
+            ARGS+=("--with-custom-kernel")
+          fi
+          apps/omlx-mac/Scripts/build.sh "${ARGS[@]}"
+
+      - name: Smoke test (embedded python via app wrappers)
+        run: |
+          APP=apps/omlx-mac/build/Stage/oMLX.app
+          [ -x "$APP/Contents/MacOS/omlx-cli" ] || { echo "missing omlx-cli wrapper"; exit 1; }
+          "$APP/Contents/MacOS/omlx-cli" --help >/dev/null && echo "omlx-cli OK"
+          "$APP/Contents/MacOS/omlx-cluster-python" -c "import mlx.core, mlx_lm, transformers; print('embedded python OK')"
+
+      - name: Package artifact
+        run: |
+          ditto -c -k --keepParent apps/omlx-mac/build/Stage/oMLX.app oMLX-app.zip
+          shasum -a 256 oMLX-app.zip | tee oMLX-app.zip.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oMLX-app-${{ github.sha }}
+          path: |
+            oMLX-app.zip
+            oMLX-app.zip.sha256
+          if-no-files-found: error
