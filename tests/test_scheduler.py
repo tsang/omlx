@@ -466,6 +466,28 @@ class TestSchedulerAddRequest:
         assert request.prompt_token_ids == token_ids
         assert request.num_prompt_tokens == 4
 
+    def test_add_request_publishes_admin_snapshot(self, mock_model, mock_tokenizer):
+        """Queued requests must be admin-visible before the first step().
+
+        The admin dashboard reads snapshot_for_admin(); if the snapshot were
+        only published at step() end, a model would keep showing "idle" for
+        the whole prefill of a long prompt after generation had started.
+        """
+        scheduler = Scheduler(model=mock_model, tokenizer=mock_tokenizer)
+
+        request = Request(
+            request_id="test-snap-publish",
+            prompt=[1, 2, 3],
+            sampling_params=SamplingParams(max_tokens=8),
+        )
+        request.prompt_token_ids = [1, 2, 3]
+        request.num_prompt_tokens = 3
+        scheduler.add_request(request)
+
+        snap = scheduler.snapshot_for_admin()
+        assert [r.request_id for r in snap["waiting"]] == ["test-snap-publish"]
+        assert snap["running_by_id"] == {}
+
     def test_add_duplicate_request_raises(self, mock_model, mock_tokenizer):
         """Test adding duplicate request raises ValueError."""
         scheduler = Scheduler(model=mock_model, tokenizer=mock_tokenizer)

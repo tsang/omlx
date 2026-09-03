@@ -8435,6 +8435,11 @@ class Scheduler:
         # Add to tracking
         self.requests[request.request_id] = request
         self.waiting.append(request)
+        # Publish the admin snapshot at enqueue time, not only at the end of
+        # the first step(). Until a step completes, the dashboard would keep
+        # reading the previous idle snapshot (empty running/waiting) and show
+        # the model as idle for the entire prefill of a long cold prompt.
+        self._publish_admin_snapshot()
 
         logger.debug(
             f"Added request {request.request_id} with {request.num_prompt_tokens} prompt tokens"
@@ -12284,13 +12289,21 @@ class Scheduler:
         """Atomically publish a fresh admin-visible snapshot.
 
         Called from step() on the engine thread, where running/waiting are
-        not concurrently mutated. The admin endpoint reads the reference via
-        snapshot_for_admin() and never iterates the live structures.
+        not concurrently mutated, and from add_request() so a queued request
+        is visible before the first step completes. The admin endpoint reads
+        the reference via snapshot_for_admin() and never iterates the live
+        structures. When the caller is not the engine thread (sync
+        add_request), the copy can race a live mutation; keep the previous
+        snapshot instead of failing. The next step() republishes anyway.
         """
-        self._admin_snapshot = {
-            "running_by_id": dict(self.running),
-            "waiting": list(self.waiting),
-        }
+        try:
+            snapshot = {
+                "running_by_id": dict(self.running),
+                "waiting": list(self.waiting),
+            }
+        except RuntimeError:
+            return
+        self._admin_snapshot = snapshot
 
     def snapshot_for_admin(self) -> dict[str, Any]:
         """Return the most recently published admin snapshot.
