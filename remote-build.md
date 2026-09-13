@@ -60,6 +60,7 @@ Timing: ~2 min to early failure, ~15-30 min full build.
 
 ## CURRENT STATE  (update this every cycle)
 
+<<<<<<< HEAD
 - **GREEN** — run **33788423369** succeeded end to end
   (https://github.com/tsang/omlx/actions/runs/33788423369), including the
   embedded-Python smoke test, at merge `93ab0f5f` (origin/main e467261e
@@ -70,12 +71,22 @@ Timing: ~2 min to early failure, ~15-30 min full build.
   com.apple.quarantine oMLX.app`).
 - HEAD on fork `main`: **93ab0f5f**; build ran at this sha.
 - Artifact: `oMLX-app-<sha>` — last: `oMLX-app-74ff125a…` **~486 MB**
+=======
+- **GREEN** — run **33785347549** succeeded end to end
+  (https://github.com/tsang/omlx/actions/runs/33785347549), including the
+  embedded-Python smoke test.
+- Artifact: `oMLX-app-<sha>` — `oMLX-app-74ff125a…` **~486 MB**
+>>>>>>> main
   (zip + sha256). Download:
   `gh run download 33785347549 --repo tsang/omlx --name oMLX-app-74ff125a8914ed7c149a51ebdb331cf751285306`
   (then unzip; ad-hoc signed → right-click Open once or `xattr -dr
   com.apple.quarantine oMLX.app`).
+<<<<<<< HEAD
 - HEAD on fork `main`: **93ab0f5f** (merge of origin/main e467261e);
   build running at this sha.
+=======
+- HEAD on fork `main`: **7ee9dc48** (docs); app build ran at `74ff125a`.
+>>>>>>> main
 - No build in progress. Monitor shells idle.
 - Next failure: `gh run view <run-id> --repo tsang/omlx --log-failed`
   (+ download `xcodebuild-log-<sha>` artifact), add a row to the failure
