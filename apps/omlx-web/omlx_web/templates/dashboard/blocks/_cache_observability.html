@@ -201,9 +201,15 @@
                         <tr>
                             <td class="px-3 py-2 font-medium">
                                 <span x-text="m.id"></span>
+                                <span x-show="m.cache_tier === 'splash'" x-cloak
+                                      class="badge ml-1.5 bg-neutral-100 text-neutral-600 border-neutral-200"
+                                      x-text="window.t('status.runtime_cache.splash_badge')"></span>
                                 <span x-show="m.cache_tier === 'rank-prompt-snapshot'" x-cloak
                                       class="badge ml-1.5 bg-violet-50 text-violet-600 border-violet-200"
                                       x-text="window.t('cluster.badge.label')"></span>
+                                <div x-show="m.cache_tier === 'splash' && m.splash_cache" x-cloak
+                                     class="text-caption font-normal text-neutral-400 mt-0.5"
+                                     x-text="window.t('status.runtime_cache.splash_reused') + ' ' + formatNumber(m.splash_cache?.reused_tokens || 0) + ' ' + window.t('status.runtime_cache.splash_tok') + ' · ' + window.t('status.runtime_cache.splash_state') + ' ' + formatNumber(m.splash_cache?.state_entries || 0) + ' · ' + formatSizeBytes(m.splash_cache?.state_bytes || 0)"></div>
                             </td>
                             <template x-if="m.cache_tier === 'rank-prompt-snapshot'">
                                 <td class="px-3 py-2 text-right text-neutral-500"
@@ -216,13 +222,13 @@
                             <template x-if="m.cache_tier !== 'rank-prompt-snapshot'">
                                 <td class="px-3 py-2 text-right">
                                     <span x-show="!m.has_sub_block_cache" x-text="formatNumber(m.indexed_blocks || 0) + ' blocks'"></span>
-                                    <span x-show="m.has_sub_block_cache" class="font-medium text-amber-600" x-text="m.indexed_blocks_display + ' tks'"></span>
+                                    <span x-show="m.has_sub_block_cache" class="font-medium text-amber-700" x-text="m.indexed_blocks_display + ' tks'"></span>
                                 </td>
                             </template>
                             <template x-if="m.cache_tier !== 'rank-prompt-snapshot'">
                                 <td class="px-3 py-2 text-right">
                                     <span x-show="m.has_sub_block_cache"
-                                          class="text-amber-600"
+                                          class="text-amber-700"
                                           x-text="window.t('status.active_models.cached_tokens').replace('{count}', (m.last_partial_tokens_skipped || m.indexed_blocks_display || ('<' + (m.block_size || '?'))))">
                                     </span>
                                     <span x-show="!m.has_sub_block_cache" class="text-neutral-400">-</span>

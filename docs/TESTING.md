@@ -64,9 +64,13 @@ Run `python -m pytest -q tests/test_cli.py tests/test_integrations.py` to check 
 
 Run `python -m pytest -q tests/test_modernbert_attention.py tests/test_embedding.py tests/test_mlx_embeddings_compat.py` to check finite padded attention, single-input equivalence, local-window masking, and embedding integration. The attention regression covers fp16, bf16, and fp32 at lengths around the affected SDPA tile boundaries.
 
+# GGUF model tests
+
+Run `python -m pytest -q tests/test_model_discovery.py tests/test_splash_engine.py tests/test_hf_downloader.py -k "gguf or Gguf or nvfp4 or FileSelection or splash_package"` for GGUF models, Splash's checkpoint checks and file-selection downloads. The `write_gguf` fixture in `tests/conftest.py` writes a GGUF header with given metadata, so discovery, the generated model folder and its derived tokenizer, Splash's checks, and per-file deletion run without a model download.
+
 # Decision model tests
 
-Run `python -m pytest -q tests/test_systemone.py` to check the `/v1/systemone` decision models. Clef cases cover the prompt layout and question/option spans, state truncation, answer formatting, the joint head parameter names against the released checkpoint layout, and one logit per option for each question. OpenJev cases cover the text and screenshot prompt layouts, image sources, the two-stage readout for more than 52 options, and the calibration and confidence formulas. A tiny random Qwen3.5 backbone checks that chunked prefill matches a single pass and that a copied prefix cache gives the same readout as a full prefill. Detection, pool dispatch, the endpoint and the oQ head passthrough are tested in `test_model_discovery.py`, `test_engine_pool.py`, `integration/test_server_endpoints.py` and `test_oq.py`. No model download is required.
+Run `python -m pytest -q tests/test_systemone.py` to check the `/v1/systemone` decision models. Clef cases cover the prompt layout and question/option spans, state truncation, answer formatting, the joint head parameter names against the released checkpoint layout, and one logit per option for each question. OpenJev cases cover the text and screenshot prompt layouts, image sources, the two-stage readout for more than 52 options, and the calibration and confidence formulas. Decision 3.0 (d3) cases cover the release prompt text, question validation, answer formatting and confidence, 3D RoPE positions for image and video prompts, video frame sampling and timestamps, and media placeholder expansion. A tiny random Qwen3.5 backbone checks that chunked prefill matches a single pass, that a copied prefix cache gives the same readout as a full prefill, and that the d3 layer-step encode matches the model's own forward without a causal mask. Base-model checkpoints are covered too: a non-periodic `layer_types` schedule, a missing LM head, and `language_model.*` / `visual.*` weight names that sanitize once. Detection, pool dispatch, the endpoint and the oQ head and readout passthrough are tested in `test_model_discovery.py`, `test_engine_pool.py`, `integration/test_server_endpoints.py` and `test_oq.py`. No model download is required.
 
 # QSA reservation tests
 
@@ -112,7 +116,9 @@ Replay is approximate; cache restoration is compared with the same chunk boundar
 
 Run `python -m pytest -q tests/test_deepseek_v41.py` for the text/vision port. Synthetic weights and small recorded official outputs cover prefill/decode, DSpark, Engram and vision numerics without a checkpoint download or vendored reference implementation. See `tests/fixtures/deepseek_v41_expected.md` for provenance and reference corrections. PyTorch is optional for the independent FP8/FP4 arithmetic checks. Other cases cover BatchGenerator admission, cache restoration, DSML and VLM engine execution.
 
-FP8 activation boundary and layout checks: `python -m pytest tests/test_deepseek_v41_activation.py -q`. These compare fused FP8 and weighted SwiGLU kernels against reference arithmetic across rounding ties, scale transitions, clipping, intermediate casts and floating-point dtypes.
+FP8 activation boundary and layout checks: `python -m pytest tests/test_deepseek_v41_activation.py -q`. These compare fused FP8 and weighted SwiGLU kernels against reference arithmetic across rounding ties, scale transitions, clipping, intermediate casts and floating-point dtypes, and the one-pass RoPE kernel (with its fused act_quant and heads-major input) against the reference rotation.
+
+Fused decode kernels: `python -m pytest tests/test_deepseek_v41_fused_decode.py -q`. A five-layer random model with MXFP or oQ2-oQ3 affine layouts (2-8 bits) runs each decode layer against the unfused block, batched and MTP verify blocks are checked bitwise against single-token decode (including the matrix-tile kernels an MTP-enabled model uses), and DSpark generation must reproduce greedy decoding.
 
 MoE activation reuse and per-expert reference checks: `python -m pytest tests/test_deepseek_v41_moe.py -q`. These cover sorted prefill, decode, independent routed/shared activation policies, and repeated outputs with small quantized weights.
 
@@ -167,9 +173,13 @@ Run `python -m pytest -q apps/omlx-web/tests/test_admin_new_profile_expose_as_mo
 
 Run `python -m pytest tests/test_mtp_xtc_sampling.py -q` for request sampler changes, late-joining mixed batches, row removal, and greedy sampling. These tests use a small MLX model and observe the MTP eligibility boundary; they do not execute a trained MTP head.
 
+### Lightning MTP command-buffer caps
+
+Run `python -m pytest -q tests/test_mlx_lm_mtp_patch.py -k "spec_command_buffers or spec_caps"` for target selection and restoration after a speculative step. These cases mock GPU detection and the native setter; they do not load a model or measure throughput.
+
 ### Batched DFlash drafter
 
-Run `python -m pytest tests/test_dflash_batched.py tests/test_mlx_lm_mtp_patch.py -q -k "dflash_batched or block_drafter"`. `test_dflash_batched.py` builds a tiny DFlash2 drafter with random weights and checks that rows drafted together match the same rows drafted alone across ring wrap-around, ragged context segments and cohort changes, plus the prefill seed window slicing and block-size clamping. The `block_drafter` cases in `test_mlx_lm_mtp_patch.py` drive the Lightning MTP verify path with a table drafter on the CountingModel harness and require token parity with standard decoding, one context entry per committed position (including late joins) and release of finished rows. Real drafter acceptance and throughput need a Qwen3.5-family VLM checkpoint with its `z-lab` DFlash draft and are measured against the standard batched engine.
+Run `python -m pytest tests/test_dflash_batched.py tests/test_mlx_lm_mtp_patch.py -q -k "dflash or block_drafter or drafter"`. `test_dflash_batched.py` builds tiny DFlash2, Laguna and Muse Glimmer drafters with random weights and checks that the batched forward matches each family's mlx-vlm `draft_block` (MiMo's value scale and trained mask embedding against a v1 reference with scaled `v_proj` weights and a replaced mask-token row), that rows drafted together match the same rows drafted alone across ring wrap-around, ragged context segments and cohort changes, and covers prefill seed window slicing, prefix-hit context restore, block-size clamping and verify-mode parsing. The `block_drafter` cases in `test_mlx_lm_mtp_patch.py` drive the Lightning MTP verify path with a table drafter on the CountingModel harness and require token parity with standard decoding, one context entry per committed position (including late joins) and release of finished rows; the drafter-target cases check layer captures on Qwen3 and Qwen3.5 text targets and require greedy parity with plain decode for tiny Qwen3 and Laguna targets, including Laguna's sliding window wrapping; on NAX hosts `test_mimo_v2_patch.py` also checks that MiMo's fused decode loop reports the same layer captures as the reference loop. Real drafter acceptance and throughput need a target checkpoint with its DFlash draft and are measured against the standard batched engine.
 
 # VLM cache boundary tests
 

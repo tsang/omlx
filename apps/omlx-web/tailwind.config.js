@@ -1,11 +1,11 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  darkMode: ['selector', '[data-theme="dark"]'],
   content: [
     "./omlx_web/templates/**/*.html",
     "./omlx_web/static/js/**/*.js",
   ],
   safelist: [
-    "sm:grid-cols-2",  // dynamic :class in _modal_model_settings.html
     "max-w-[90rem]", "max-w-[100rem]", "max-w-none",  // dashboardWidthClass in dashboard_layout.js
     "bg-emerald-500", "text-white", "border-emerald-500",
     "bg-emerald-50", "text-emerald-700", "border-emerald-200", "hover:bg-emerald-100",
@@ -18,6 +18,14 @@ module.exports = {
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
+      },
+      // neutral-400 is too light for text (2.52:1 on white); text takes the
+      // 500 step so it meets WCAG AA. Borders and backgrounds keep 400.
+      // Dark mode maps the class to --text-muted in dashboard.css.
+      textColor: {
+        neutral: {
+          400: 'rgb(var(--palette-neutral-500) / <alpha-value>)',
+        },
       },
       // Tailwind's palette resolves through the tokens in static/css/theme.css.
       colors: {

@@ -1,3 +1,6 @@
+    :root { accent-color: rgb(var(--palette-neutral-900)); }
+    [data-theme="dark"] { accent-color: rgb(var(--palette-neutral-200)); }
+
     body {
         background-color: var(--bg-primary) !important;
         color: var(--text-primary) !important;
@@ -37,6 +40,10 @@
     [data-theme="dark"] .border-neutral-300 { border-color: var(--border-normal) !important; }
     [data-theme="dark"] .divide-neutral-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--border-faint) !important; }
     [data-theme="dark"] .divide-neutral-200 > :not([hidden]) ~ :not([hidden]) { border-color: var(--border-faint) !important; }
+
+    /* Row dividers that skip x-show rows (inline display: none), unlike divide-y. */
+    .settings-rows > :not(template):not([style*="display: none"]) ~ :not(template):not([style*="display: none"]) { border-top: 1px solid rgb(var(--palette-neutral-200)); }
+    [data-theme="dark"] .settings-rows > :not(template):not([style*="display: none"]) ~ :not(template):not([style*="display: none"]) { border-top-color: var(--border-faint); }
 
     /* === Hover states === */
     [data-theme="dark"] .hover\:bg-neutral-100:hover { background-color: var(--bg-tertiary) !important; }
@@ -134,7 +141,7 @@
     }
 
     /* === Code/pre blocks === */
-    [data-theme="dark"] code { background-color: var(--code-bg) !important; color: var(--text-primary) !important; }
+    [data-theme="dark"] code:not([class]) { background-color: var(--code-bg) !important; color: var(--text-primary) !important; }
     [data-theme="dark"] pre:not(.bg-neutral-100) { background-color: var(--code-bg) !important; color: var(--text-primary) !important; }
 
     /* === Focus rings === */
@@ -152,6 +159,9 @@
     /* Toggle OFF state */
     [data-theme="dark"] button.bg-neutral-200 {
         background-color: var(--bg-tertiary) !important;
+    }
+    [data-theme="dark"] button[role="switch"].bg-neutral-200:not(:focus) {
+        box-shadow: inset 0 0 0 1px rgb(var(--palette-zinc-500));
     }
     /* Default radio button (ON state) */
     [data-theme="dark"] button.bg-black.border-black {
@@ -197,7 +207,7 @@
     [data-theme="dark"] .bg-red-50 { background-color: rgb(var(--palette-red-500) / 0.15) !important; }
     [data-theme="dark"] .border-red-200 { border-color: rgb(var(--palette-red-500) / 0.3) !important; }
     [data-theme="dark"] .text-red-500 { color: rgb(var(--palette-red-400)) !important; }
-    [data-theme="dark"] .text-red-600 { color: rgb(var(--palette-red-500)) !important; }
+    [data-theme="dark"] .text-red-600 { color: rgb(var(--palette-red-400)) !important; }
     [data-theme="dark"] .text-red-700 { color: rgb(var(--palette-red-300)) !important; }
     [data-theme="dark"] .bg-emerald-50 { background-color: rgb(var(--palette-emerald-500) / 0.15) !important; }
     [data-theme="dark"] .hover\:bg-emerald-100:hover { background-color: rgb(var(--palette-emerald-500) / 0.25) !important; }
@@ -1117,6 +1127,9 @@
     .usage-model-table td { white-space: nowrap; }
 
     /* === Dashboard layout grid (GridStack) === */
+    /* GridStack insets every block by its 12px margin; pull the grid out by the
+       same amount so Status lines up with the other tabs. */
+    .dash-grid { margin-inline: -12px; }
     .dash-grid > .dash-block-parked { display: none; }
     /* Item content is absolutely positioned by GridStack; let shadows, tooltips
        and select popovers escape in view mode. */
@@ -1299,6 +1312,13 @@
         background-color: var(--bg-primary);
         color: var(--text-primary);
     }
+    /* Half-filled smarts dot on the Recommended downloader tab. */
+    .rec-dot-half {
+        background: linear-gradient(90deg, rgb(var(--palette-neutral-500)) 50%, rgb(var(--palette-neutral-200)) 50%);
+    }
+    [data-theme="dark"] .rec-dot-half {
+        background: linear-gradient(90deg, rgb(var(--palette-neutral-500)) 50%, var(--bg-tertiary) 50%);
+    }
     /* Compact size for choices inside a card or a table row. */
     .segmented--sm { padding: 0.125rem; }
     .segmented--sm .segmented__item {
@@ -1313,6 +1333,13 @@
         grid-template-columns: 11rem minmax(0, 1fr);
         gap: 1.5rem;
         align-items: start;
+    }
+    /* The sub-tab row is the mask cards scroll under; extend it to the rail's
+       top so the cards and the rail are cut at the same line. The static layout
+       is unchanged: the added padding comes out of the margin (mb-6). */
+    .page-tabs.page-tabs--settings-rail {
+        padding-bottom: 1.5rem;
+        margin-bottom: 0.75rem;
     }
     .settings-section {
         scroll-margin-top: calc(var(--dashboard-topbar-height) + var(--dashboard-subtabs-height) + 0.75rem);
@@ -1350,9 +1377,21 @@
         font-weight: 600;
         background-color: var(--bg-tertiary);
     }
+    /* Model settings modal: the rail sticks inside the scrolling modal body. */
+    .model-settings-layout {
+        display: grid;
+        grid-template-columns: 12.5rem minmax(0, 1fr);
+        gap: 1.5rem;
+        align-items: start;
+    }
+    .model-settings-layout > .settings-rail {
+        top: 0;
+        max-height: none;
+    }
     @media (max-width: 900px) {
         .settings-layout { grid-template-columns: minmax(0, 1fr); }
         .settings-rail { display: none; }
+        .model-settings-layout { grid-template-columns: minmax(0, 1fr); }
     }
 
     /* === Log viewer: record table === */

@@ -8,7 +8,7 @@ These models define the request and response schemas for:
 
 import time
 import uuid
-from typing import List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -41,8 +41,14 @@ class EmbeddingRequest(BaseModel):
     OpenAI-compatible request format for the /v1/embeddings endpoint.
     """
 
-    input: Optional[Union[str, List[str]]] = None
-    """Input text(s) to embed. Can be a single string or list of strings."""
+    input: Optional[Union[str, List[Union[str, Dict[str, Any]]]]] = None
+    """Input text(s) to embed.
+
+    Accepts a single string, a list of strings, or OpenAI-style multimodal
+    content parts (a list containing ``{"type": "text"|"image_url"|
+    "input_audio", ...}`` dicts), which describe one multimodal input and
+    are folded into the same internal shape as ``items``.
+    """
 
     items: Optional[List[EmbeddingInputItem]] = None
     """Structured embedding items for multimodal inputs."""
@@ -57,10 +63,12 @@ class EmbeddingRequest(BaseModel):
     - "base64": Returns a base64-encoded string of little-endian floats
     """
 
-    dimensions: Optional[int] = None
+    dimensions: Optional[int] = Field(default=None, gt=0)
     """
     The number of dimensions the output embeddings should have.
     Only supported by some models. If not supported, returns full dimensions.
+    Must be positive: 0 inconsistently returned the full vector and negative
+    values truncated from the end instead of being rejected.
     """
 
     max_length: Optional[int] = Field(default=None, gt=0)
