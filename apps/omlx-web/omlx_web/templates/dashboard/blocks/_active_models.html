@@ -197,6 +197,8 @@
                         <template x-for="pp in m.prefilling" :key="pp.request_id">
                             <div class="flex items-center gap-2">
                                 <span class="text-caption font-mono text-neutral-400 w-16 truncate" x-text="pp.request_id.substring(0, 8)"></span>
+                                <span x-show="pp.client_ip" class="text-caption font-mono text-neutral-500" :title="requestInfoTip(pp)" x-text="pp.client_ip"></span>
+                                <span x-show="formatRequestPreview(pp)" class="text-caption text-neutral-500 max-w-[18rem] truncate" :title="requestInfoTip(pp)" x-text="formatRequestPreview(pp)"></span>
                                 <div class="flex-1 h-1.5 bg-neutral-100 rounded-full overflow-hidden max-w-[120px]">
                                     <div class="h-full bg-blue-400 rounded-full transition-all duration-300"
                                          :style="'width: ' + (pp.total > 0 ? Math.min(100, pp.processed / pp.total * 100) : 0) + '%'"></div>
@@ -218,6 +220,8 @@
                         <template x-for="gen in m.generating" :key="gen.request_id">
                             <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
                                 <span class="text-caption font-mono text-neutral-400 w-16 truncate" x-text="gen.request_id.substring(0, 8)"></span>
+                                <span x-show="gen.client_ip" class="text-caption font-mono text-neutral-500" :title="requestInfoTip(gen)" x-text="gen.client_ip"></span>
+                                <span x-show="formatRequestPreview(gen)" class="text-caption text-neutral-500 max-w-[18rem] truncate" :title="requestInfoTip(gen)" x-text="formatRequestPreview(gen)"></span>
                                 <span class="inline-flex items-center gap-2 min-w-[104px] whitespace-nowrap">
                                     <span class="w-2 h-2 rounded-full flex-shrink-0 bg-green-400 animate-pulse"></span>
                                     <span class="text-caption text-green-700 font-medium" x-text="window.t('status.active_models.generating')"></span>
@@ -238,6 +242,8 @@
                         <template x-for="activity in m.activities" :key="activity.request_id">
                             <div class="flex flex-wrap items-center gap-x-5 gap-y-1">
                                 <span class="text-caption font-mono text-neutral-400 w-16 truncate" x-text="activity.request_id.substring(0, 8)"></span>
+                                <span x-show="activity.client_ip" class="text-caption font-mono text-neutral-500" :title="requestInfoTip(activity)" x-text="activity.client_ip"></span>
+                                <span x-show="formatRequestPreview(activity)" class="text-caption text-neutral-500 max-w-[18rem] truncate" :title="requestInfoTip(activity)" x-text="formatRequestPreview(activity)"></span>
                                 <span class="inline-flex items-center gap-2 min-w-[120px] whitespace-nowrap">
                                     <span class="w-2 h-2 rounded-full flex-shrink-0" :class="activityDotClass(activity.last_activity_age_seconds)"></span>
                                     <span class="text-caption text-green-700 font-medium" x-text="activity.detail || activity.kind || window.t('status.active_models.active')"></span>
@@ -254,6 +260,8 @@
                         <template x-for="wait in m.waiting" :key="wait.request_id">
                             <div class="flex items-center gap-2">
                                 <span class="text-caption font-mono text-neutral-400 w-16 truncate" x-text="wait.request_id.substring(0, 8)"></span>
+                                <span x-show="wait.client_ip" class="text-caption font-mono text-neutral-500" :title="requestInfoTip(wait)" x-text="wait.client_ip"></span>
+                                <span x-show="formatRequestPreview(wait)" class="text-caption text-neutral-500 max-w-[18rem] truncate" :title="requestInfoTip(wait)" x-text="formatRequestPreview(wait)"></span>
                                 <span class="w-2 h-2 rounded-full bg-amber-300"></span>
                                 <span class="text-caption text-amber-700 font-medium" x-text="window.t('status.active_models.waiting') + ' #' + wait.queue_position"></span>
                                 <span class="text-caption text-neutral-400" x-text="formatDurationShort(wait.elapsed_seconds)"></span>

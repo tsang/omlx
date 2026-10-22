@@ -4704,6 +4704,20 @@
                 return parts.join(' · ');
             },
 
+            formatRequestPreview(row) {
+                if (!row || !row.preview) return '';
+                return (row.media ? '[' + row.media + '] ' : '') + row.preview;
+            },
+
+            requestInfoTip(row) {
+                if (!row) return '';
+                const parts = [];
+                if (row.source) parts.push(row.source);
+                if (row.user_agent) parts.push(row.user_agent);
+                if (row.referer) parts.push(row.referer);
+                return parts.join(' · ');
+            },
+
             activityDotClass(seconds) {
                 if (seconds == null || !Number.isFinite(seconds)) return 'bg-green-400 animate-pulse';
                 if (seconds < 15) return 'bg-green-400 animate-pulse';

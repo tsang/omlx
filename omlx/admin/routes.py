@@ -6851,6 +6851,7 @@ def _build_active_models_data() -> dict:
     """Build active models status for the dashboard Active Models card."""
     from ..model_discovery import format_size
     from ..prefill_progress import get_prefill_tracker
+    from ..request_context import get_request_context_registry
 
     engine_pool = _get_engine_pool()
     server_state = _get_server_state()
@@ -7122,6 +7123,16 @@ def _build_active_models_data() -> dict:
 
         if is_loaded and effective_ttl is not None and idle_seconds is not None:
             ttl_remaining_seconds = max(0.0, effective_ttl - idle_seconds)
+
+        # Attach client context (ip / API surface / last-message preview)
+        # registered by the inference routes at dispatch time. Rows the
+        # registry does not know (engine-internal ids, cluster samples) are
+        # left unchanged.
+        ctx_registry = get_request_context_registry()
+        for row in [*waiting, *generating, *prefilling, *activities]:
+            ctx = ctx_registry.get(row.get("request_id"))
+            if ctx:
+                row.update(ctx)
 
         models.append(
             {

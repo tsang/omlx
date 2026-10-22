@@ -237,6 +237,7 @@ from .exceptions import (
 from .model_settings import forced_ct_keys, merge_chat_template_request_kwargs
 from .models.decision import DecisionContextLengthError, DecisionRequestError
 from .prefill_progress import get_prefill_tracker
+from .request_context import register_inference_context
 from .server_metrics import get_server_metrics, reset_server_metrics
 from .utils.network import is_loopback_bind
 
@@ -4492,6 +4493,12 @@ async def create_completion(
             await engine.preflight_completion(prompt, request_id=upstream_request_id)
         await _raise_if_llm_lease_abort_requested(lease)
         inference_request_id = str(uuid.uuid4())
+        register_inference_context(
+            inference_request_id,
+            http_request,
+            source="openai/completions",
+            prompt=prompts,
+        )
 
         if request.stream:
             response_id = f"cmpl-{uuid.uuid4().hex[:8]}"
@@ -5143,6 +5150,12 @@ async def create_chat_completion(
         await _raise_if_llm_lease_abort_requested(lease)
         inference_request_id = str(uuid.uuid4())
         chat_kwargs["_request_id"] = inference_request_id
+        register_inference_context(
+            inference_request_id,
+            http_request,
+            source="openai/chat",
+            messages=messages,
+        )
 
         if request.stream:
             # Pre-mint the completion id so the keepalive frame (emitted before the
@@ -7793,6 +7806,12 @@ async def create_anthropic_message(
         await _raise_if_llm_lease_abort_requested(lease)
         inference_request_id = str(uuid.uuid4())
         chat_kwargs["_request_id"] = inference_request_id
+        register_inference_context(
+            inference_request_id,
+            http_request,
+            source="anthropic/messages",
+            messages=messages,
+        )
 
         if request.stream:
             return StreamingResponse(
@@ -8556,6 +8575,12 @@ async def create_response(
         await _raise_if_llm_lease_abort_requested(lease)
         inference_request_id = str(uuid.uuid4())
         chat_kwargs["_request_id"] = inference_request_id
+        register_inference_context(
+            inference_request_id,
+            http_request,
+            source="openai/responses",
+            messages=messages,
+        )
 
         if request.stream:
             sse_headers = {
