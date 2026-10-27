@@ -6,6 +6,7 @@ import copy
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pydantic
 import pytest
 from fastapi import HTTPException
 
@@ -49,6 +50,18 @@ def _write_qwen4_mtp_checkpoint(tmp_path, *, embedded_mtp: bool) -> None:
     (tmp_path / "model.safetensors.index.json").write_text(
         json.dumps({"weight_map": {weight_key: "model.safetensors"}})
     )
+
+
+def _write_minimax_m3_checkpoint(tmp_path, *, dspark: bool) -> None:
+    config = {"model_type": "minimax_m3_vl", "text_config": {"num_hidden_layers": 60}}
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    if dspark:
+        draft = tmp_path / "dspark"
+        draft.mkdir()
+        (draft / "config.json").write_text(
+            json.dumps({"architectures": ["DSparkMiniMaxDraftModel"]})
+        )
+        (draft / "model-dspark-00001.safetensors").write_bytes(b"")
 
 
 async def _update_settings(
@@ -270,6 +283,31 @@ def _idle_engine() -> MagicMock:
     engine.scheduler = None
     engine._engine = None
     return engine
+
+
+@pytest.mark.asyncio
+async def test_gpu_power_limit_saves_without_reload():
+    pool, entry = _failed_pool()
+    entry.engine = _idle_engine()
+    entry.load_failed = False
+    pool._unload_engine = AsyncMock()
+    settings = ModelSettings()
+
+    def request(watts):
+        return admin_routes.ModelSettingsRequest(gpu_power_limit_w=watts)
+
+    result = await _update_settings(pool, settings, request(10))
+    assert settings.gpu_power_limit_w == 10
+    assert result["requires_reload"] is False
+    pool._unload_engine.assert_not_awaited()
+
+    await _update_settings(pool, settings, request(0))
+    assert settings.gpu_power_limit_w is None
+
+    # Profiles and templates go through the same request model.
+    with pytest.raises(pydantic.ValidationError):
+        request(1)
+    assert admin_routes._normalize_profile_settings({"gpu_power_limit_w": 0}) == {}
 
 
 @pytest.mark.asyncio
@@ -624,6 +662,43 @@ async def test_qwen4_mtp_setting_rejects_nextn_only_layout(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_minimax_m3_mtp_setting_accepts_bundled_dspark(tmp_path):
+    _write_minimax_m3_checkpoint(tmp_path, dspark=True)
+    pool, entry = _failed_pool()
+    entry.model_path = str(tmp_path)
+    entry.config_model_type = "minimax_m3_vl"
+    settings = ModelSettings()
+
+    await _update_settings(
+        pool,
+        settings,
+        admin_routes.ModelSettingsRequest(mtp_enabled=True),
+    )
+
+    assert settings.mtp_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_minimax_m3_mtp_setting_rejects_missing_dspark(tmp_path):
+    _write_minimax_m3_checkpoint(tmp_path, dspark=False)
+    pool, entry = _failed_pool()
+    entry.model_path = str(tmp_path)
+    entry.config_model_type = "minimax_m3_vl"
+    settings = ModelSettings()
+
+    with pytest.raises(admin_routes.HTTPException) as exc_info:
+        await _update_settings(
+            pool,
+            settings,
+            admin_routes.ModelSettingsRequest(mtp_enabled=True),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "no bundled dspark/ draft" in exc_info.value.detail
+    assert settings.mtp_enabled is False
+
+
+@pytest.mark.asyncio
 async def test_qwen_ane_prefill_rejects_invalid_block_size():
     pool, entry = _failed_pool()
     entry.config_model_type = "qwen3_5"
@@ -774,6 +849,15 @@ async def test_mtp_depth_rejects_out_of_range_values(field, value):
             ModelSettings(),
             admin_routes.ModelSettingsRequest(**{field: value}),
         )
+
+
+@pytest.mark.parametrize("value", [0, -5])
+def test_output_token_caps_below_one_are_rejected(value):
+    # The global route applies the runtime copy before validate().
+    with pytest.raises(pydantic.ValidationError, match="max_tokens"):
+        admin_routes.ModelSettingsRequest(max_tokens=value)
+    with pytest.raises(pydantic.ValidationError, match="sampling_max_tokens"):
+        admin_routes.GlobalSettingsRequest(sampling_max_tokens=value)
 
 
 def test_unknown_settings_fields_are_rejected_loudly():

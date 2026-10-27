@@ -49,6 +49,7 @@ from mlx_lm.models.cache import (
     make_prompt_cache,
 )
 from mlx_lm.sample_utils import make_logits_processors
+from mlx_lm.tokenizer_utils import _byte_decoder
 from mlx_vlm.models import cache as _vlm_cache
 
 from .cache.deepseek_v41_delta import compact_snapshot as compact_deepseek_v41_snapshot
@@ -58,6 +59,7 @@ from .cache.pooling_delta import compact_pooling_cache_snapshot
 from .cache.prefix_cache import BlockAwarePrefixCache, cachelist_pm_member_plan
 from .decode_activity import get_decode_activity
 from .exceptions import (
+    InvalidRequestError,
     PrefillMemoryExceededError,
     describe_ceiling_binding,
     is_cache_corruption_error,
@@ -79,7 +81,13 @@ from .prefill_boundaries import (
 )
 from .prefill_progress import get_prefill_tracker
 from .prefill_transient_tracker import PrefillTransientTracker
-from .request import Request, RequestOutput, RequestStatus, SamplingParams
+from .request import (
+    Request,
+    RequestOutput,
+    RequestStatus,
+    SamplingParams,
+    TokenLogprob,
+)
 from .speculative.processing_sampler import (
     MTPProcessingSampler,
     MTPProcessorContractError,
@@ -106,10 +114,26 @@ from .utils.metal_sync import (
     unreleased_graphics_bytes,
 )
 from .utils.proc_memory import get_graphics_footprint, get_phys_footprint
-from .utils.sampling import make_no_repeat_ngram_processor
+from .utils.sampling import make_no_repeat_ngram_processor, select_logprobs
 from .utils.sampling import make_sampler as omlx_make_sampler
 from .utils.sampling import make_shared_sampler as omlx_make_shared_sampler
 from .utils.tokenizer import create_streaming_detokenizer
+
+
+def _token_bytes(detokenizer: Any, tokenizer: Any, token_id: int) -> bytes:
+    """Return the bytes one token adds to the decoded text."""
+    tokenmap = getattr(detokenizer, "tokenmap", None)
+    if tokenmap is not None and 0 <= token_id < len(tokenmap):
+        piece = tokenmap[token_id]
+        if isinstance(piece, bytes):
+            # SPM: byte-fallback tokens already hold their byte value.
+            return piece.replace("\u2581".encode(), b" ")
+        byte_decoder = _byte_decoder()
+        return b"".join(
+            bytes([byte_decoder[ch]]) if ch in byte_decoder else ch.encode()
+            for ch in piece
+        )
+    return tokenizer.decode([token_id]).encode()
 
 
 def _compact_boundary_snapshot_value(
@@ -2410,6 +2434,8 @@ class Scheduler:
         self._fixed_state_recorded: bool = False
         # SpecPrefill: draft model for attention-based sparse prefill
         self._specprefill_draft_model: Any | None = None
+        self._specprefill_default_keep_pct: float | None = None
+        self._specprefill_default_threshold: int | None = None
         self._draft_paged_ssd_cache_manager: Any | None = None
         self._draft_prefix_cache: Any | None = None
         # Track active specprefill request for RoPE cleanup
@@ -2601,6 +2627,8 @@ class Scheduler:
         self._request_detokenizers: dict[str, Any] = (
             {}
         )  # request_id → active detokenizer
+        # Only its token table is read, so one instance serves every request.
+        self._logprob_detokenizer: Any = None
 
         # Protocol-specific output parser support (e.g. Harmony, Gemma 4)
         self._output_parser_factory: OutputParserFactory | None = None
@@ -3513,6 +3541,26 @@ class Scheduler:
             detok.reset()
             self._request_detokenizers[request_id] = detok
         return self._request_detokenizers[request_id]
+
+    def _token_logprob(self, response: Any, top_n: int) -> TokenLogprob:
+        if self._logprob_detokenizer is None:
+            self._logprob_detokenizer = create_streaming_detokenizer(
+                self.tokenizer, model_path=self.config.model_path
+            )
+
+        def entry(token_id: int, logprob: float) -> TokenLogprob:
+            raw = _token_bytes(self._logprob_detokenizer, self.tokenizer, token_id)
+            return TokenLogprob(
+                token_id=token_id,
+                text=raw.decode(errors="replace"),
+                token_bytes=list(raw),
+                logprob=logprob,
+            )
+
+        chosen, top = select_logprobs(response.logprobs, response.token, top_n)
+        result = entry(response.token, chosen)
+        result.top = [entry(token_id, logprob) for token_id, logprob in top]
+        return result
 
     def _cleanup_detokenizer(self, request_id: str):
         """Clean up detokenizer for a finished request.
@@ -10439,10 +10487,9 @@ class Scheduler:
                     request.request_id,
                     request.prompt_token_ids,
                     extra_keys=request.vlm_extra_keys_for_cache,
-                    extra_key_token_start=(
-                        request.vlm_extra_key_token_start_for_cache
-                    ),
+                    extra_key_token_start=(request.vlm_extra_key_token_start_for_cache),
                     extra_key_ranges=request.vlm_extra_key_ranges_for_cache,
+                    record_stats=False,
                 )
             fetch_ms = (time.perf_counter() - fetch_started) * 1000.0
             # A split GDN sidecar represents state at a full block boundary.
@@ -10613,6 +10660,12 @@ class Scheduler:
                     )
             else:
                 request.remaining_tokens = request.prompt_token_ids
+            # Index matches can outlive their tensor payloads, and successful
+            # reconstruction can still be rejected during scheduling. Keep
+            # ordinary reuse separate from SpecPrefill's exact static-prefix
+            # restores, and skip requeues of this request's own progress.
+            if not _request_count(request, "memory_requeues"):
+                request.pending_prefix_cache_tokens = request.cached_tokens
         else:
             # No paged SSD cache configured - process all tokens
             request.remaining_tokens = request.prompt_token_ids
@@ -10658,6 +10711,18 @@ class Scheduler:
             )
         self._prefix_cache_prepared.add(request.request_id)
 
+    def _record_prefix_cache_result(self, request: Request) -> None:
+        """Finalize ordinary prefix metrics after scheduling's fallback guards."""
+        pending_tokens = request.pending_prefix_cache_tokens
+        if pending_tokens is None:
+            return
+        if self.block_aware_cache is not None:
+            self.block_aware_cache.record_cache_result(
+                len(request.prompt_token_ids),
+                min(pending_tokens, request.cached_tokens),
+            )
+        request.pending_prefix_cache_tokens = None
+
     def add_request(self, request: Request) -> None:
         """
         Add a new request to the scheduler.
@@ -10690,6 +10755,12 @@ class Scheduler:
             else:
                 request.prompt_token_ids = list(request.prompt)
             request.num_prompt_tokens = len(request.prompt_token_ids)
+        # BatchGenerator.insert refuses an empty prompt inside step(), which
+        # fails every request on the engine.
+        if not request.prompt_token_ids:
+            raise InvalidRequestError(
+                "prompt must contain at least one token", field="prompt"
+            )
         self._resolve_generation_prompt_start(request)
         if self.moe_offload_stats is not None:
             request.moe_offload_start = self.moe_offload_stats()
@@ -10731,7 +10802,11 @@ class Scheduler:
         )
 
     def set_specprefill_draft_model(
-        self, draft_model: Any, draft_model_name: str | None = None
+        self,
+        draft_model: Any,
+        draft_model_name: str | None = None,
+        keep_pct: float | None = None,
+        threshold: int | None = None,
     ) -> None:
         """Set the draft model for SpecPrefill scoring.
 
@@ -10743,6 +10818,8 @@ class Scheduler:
                 "Could not close the previous SpecPrefill draft SSD cache manager"
             )
         self._specprefill_draft_model = draft_model
+        self._specprefill_default_keep_pct = keep_pct
+        self._specprefill_default_threshold = threshold
         self._draft_prefix_cache = None
         if not draft_model_name:
             logger.info(
@@ -10888,7 +10965,8 @@ class Scheduler:
         caller can fall back to the normal BatchGenerator path.
         """
         drafter = self._vlm_mtp_drafter
-        if drafter is None:
+        # The vlm_mtp loop emits no logprobs.
+        if drafter is None or request.sampling_params.logprobs:
             return None
 
         # Per-request logits processors that implement the snapshot/restore
@@ -11307,8 +11385,8 @@ class Scheduler:
             cached_tokens=request.cached_tokens,
             requested_threshold=getattr(request, "_specprefill_threshold", None),
             requested_keep_pct=getattr(request, "_specprefill_keep_pct", None),
-            default_threshold=DEFAULT_THRESHOLD,
-            default_keep_pct=DEFAULT_KEEP_RATE,
+            default_threshold=self._specprefill_default_threshold or DEFAULT_THRESHOLD,
+            default_keep_pct=self._specprefill_default_keep_pct or DEFAULT_KEEP_RATE,
         )
         if plan is None:
             return
@@ -13095,6 +13173,10 @@ class Scheduler:
                         request.remaining_tokens = request.prompt_token_ids
                         tokens_to_process = request.prompt_token_ids
                     # Fall through to normal prefill
+            # Cache validation and sparse-prefill failure can discard all
+            # restored KV. Commit metrics only after both guards have run.
+            self._record_prefix_cache_result(request)
+
             # External prefill: process tokens[0:N-1] outside BatchGenerator.
             # Only the last token goes to insert() for the first decode step.
             # SpecPrefill already handled its own prefill above, so skip for those.
@@ -13603,13 +13685,16 @@ class Scheduler:
                             request.output_text = prefix_text + request.output_text
                     request.think_prefix_sent = True
 
-            # Immediately discard logprobs if not requested to free memory (~800KB per response)
-            # This prevents accumulation of large MLX arrays during streaming
-            if (
-                hasattr(response, "logprobs")
-                and response.logprobs is not None
-                and not request.sampling_params.logprobs
-            ):
+            # Reduce the vocab-sized row to what the request asked for, then
+            # drop it so large MLX arrays do not pile up during streaming.
+            token_logprobs = None
+            if getattr(response, "logprobs", None) is not None:
+                if request.sampling_params.logprobs and not is_stop:
+                    token_logprobs = [
+                        self._token_logprob(
+                            response, request.sampling_params.top_logprobs or 0
+                        )
+                    ]
                 response.logprobs = None
 
             # Create output
@@ -13622,6 +13707,7 @@ class Scheduler:
                 request_id=request_id,
                 new_token_ids=[response.token] if not is_stop else [],
                 new_text=new_text,
+                logprobs=token_logprobs,
                 # Only the terminal chunk's cumulative ids are read.
                 output_token_ids=list(request.output_token_ids) if is_finished else [],
                 prompt_tokens=request.num_prompt_tokens,
@@ -13730,6 +13816,7 @@ class Scheduler:
                             : max(0, cut - len(pending_text))
                         ]
                         output.new_token_ids = []
+                        output.logprobs = None
                         output.tool_calls = []
 
                 # Both parser and ordinary text omit the first matched stop,
@@ -15537,6 +15624,7 @@ class Scheduler:
         # Release model and tokenizer references for GC
         self.model = None
         self.tokenizer = None
+        self._logprob_detokenizer = None
 
         # Release all cache-related references for GC
         if self._boundary_snapshot_store is not None:

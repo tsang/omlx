@@ -339,12 +339,27 @@ def _cache_compat_signature(
 # Model modules whose forward numerics changed under a dependency update.
 # Blocks written before the change are unsafe for these models only.
 _NUMERICS_REVISIONS = {
+    # oMLX's MiniMax M3 now forms its RMSNorm weights, SwiGLU and expert sum
+    # in float32, so blocks from the earlier forward differ.
+    "mlx_vlm.models.minimax_m3_vl.language": "minimax-f32-1",
     # mlx-lm a63e24c scales the GDN q/k l2norm eps by inv_scale**2.
     "mlx_lm.models.qwen3_5": "gdn-qk-norm-2",
     "mlx_lm.models.qwen3_next": "gdn-qk-norm-2",
-    "mlx_lm.models.bailing_hybrid": "gdn-qk-norm-2",
+    # Ling's 2-9 row MLA forwards also moved to the absorbed path.
+    "mlx_lm.models.bailing_hybrid": "gdn-qk-norm-2+mla-absorbed-1",
     # omlx.patches.qwen35_gdn_prework applies the same fix to mlx-vlm.
     "mlx_vlm.models.qwen3_5.language": "gdn-qk-norm-2",
+    # mlx-lm 0d4d3d04 changes these forwards: the YaRN ``truncate`` flag of
+    # gpt-oss, ERNIE-4.5 and PhiMoE routing, PLaMo3 YaRN and windows, and the
+    # FP8 Ministral 3 linears.
+    "mlx_lm.models.gpt_oss": "mlx-lm-0d4d3d04",
+    "mlx_lm.models.ernie4_5_moe": "mlx-lm-0d4d3d04",
+    "mlx_lm.models.phimoe": "mlx-lm-0d4d3d04",
+    "mlx_lm.models.plamo3": "mlx-lm-0d4d3d04",
+    "mlx_lm.models.ministral3": "mlx-lm-0d4d3d04",
+    # mlx-lm's Muse Spark keeps the residual stream in FP32; oMLX's own model
+    # served Muse Spark before and kept it in BF16.
+    "mlx_lm.models.muse_spark": "upstream-1",
 }
 
 
@@ -382,6 +397,9 @@ def numerics_revision_for_model(model: Any) -> str | None:
     }
     if yarn := _yarn_revision(modules):
         revisions.add(yarn)
+    # Set by cast_bf16_params_to_fp16: KV computed before the recast is bf16.
+    if any(getattr(module, "_omlx_fp16_recast", False) for module in modules):
+        revisions.add("fp16-recast")
     return ",".join(sorted(revisions)) or None
 
 
@@ -5488,11 +5506,10 @@ class PagedSSDCacheManager(CacheManager):
                         f"{len(entries_to_flush) - flushed - failed} remaining)"
                     )
                     break
-                blk_meta = entry.get("block_metadata")
                 if not entry.get("dirty", True):
                     continue
-                if blk_meta and blk_meta.file_path.exists():
-                    continue
+                # A file at the same hash may contain an older, incompatible
+                # payload. Only the dirty flag proves this entry is persisted.
                 if self._enqueue_ssd_write(block_hash, entry, blocking=True):
                     flushed += 1
                 else:

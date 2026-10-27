@@ -1660,6 +1660,40 @@ def test_recovery_candidate_payload_versus_quoted_marker(markers, text, is_paylo
     assert f.take_recovery_candidate()
 
 
+def test_recovery_candidate_unclosed_envelope_3153_is_payload():
+    """Issue #3153 sample is a truncated call payload, not quoted-marker prose.
+
+    Option 1 recovery is not attempted here: the sample has no closing tags
+    and uses bare query= rather than <parameter=query>.
+    """
+    sample = (
+        "I have comprehensive material. Let me do one final targeted check...\n"
+        "\n"
+        "<tool_call>\n"
+        "<function=websearch>\n"
+        'query="Flowable Work platform-api analytics process-instance query '
+        'endpoint frequency duration chart data REST" numResults=5'
+    )
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "websearch",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+            },
+        }
+    ]
+    f = ToolCallStreamFilter(_make_tokenizer(), tools=tools)
+    visible = f.feed(sample) + f.finish()
+
+    assert "<tool_call>" not in visible
+    assert f.recovery_candidate_is_payload() is True
+    assert f.take_recovery_candidate().startswith("<tool_call>")
+
+
 def test_close_marker_fallback_rescans_the_recovered_tail():
     """Prose recovered after a close marker is re-filtered, not emitted raw."""
     f = ToolCallStreamFilter(_make_tokenizer())
@@ -5901,7 +5935,6 @@ def test_native_union_parameter_keeps_correct_python_literal_values(
     assert json.loads(calls[0].function.arguments)["v"] == expected
 
 
-
 def test_stream_filter_suppresses_envelope_with_long_tool_name():
     name = "t" * 120
     f = ToolCallStreamFilter(_make_tokenizer(), tools={name})
@@ -5933,3 +5966,20 @@ def test_qwen_missing_outer_close_does_not_merge_next_call():
     decoded = [(c.function.name, c.function.arguments) for c in calls]
     assert decoded == [("f", '{"a": "one"}'), ("f", '{"a": "two"}')]
     assert errors == ()
+
+
+@pytest.mark.parametrize(
+    "think_start, expected",
+    [
+        ("<think>", "Strip ```` spans."),
+        ("<mm:think>", "Strip ``<think>...</think>`` spans."),
+    ],
+)
+def test_think_tags_in_the_answer_survive_for_leading_thinking_models(
+    think_start, expected
+):
+    tok = _make_tokenizer()
+    tok.think_start = think_start
+    cleaned, calls = parse_tool_calls("Strip ``<think>...</think>`` spans.", tok, None)
+    assert calls is None
+    assert cleaned == expected
