@@ -160,6 +160,16 @@ private struct GeneralSection: View {
                     ])
                 }
                 Row(
+                    label: String(localized: "askai.row.clear_on_reopen",
+                                  defaultValue: "Fresh Prompt on Reopen",
+                                  comment: "Row label for the Ask AI option that empties the prompt when the bar is dismissed with the hotkey while it still has content"),
+                    sublabel: String(localized: "askai.row.clear_on_reopen.sub",
+                                     defaultValue: "Closing the bar with the activation hotkey while the prompt still has text or images makes the next activation open an empty one. Escape and buttons keep the draft.",
+                                     comment: "Sublabel for the Ask AI prompt clearing option")
+                ) {
+                    RowSwitch(isOn: $store.prefs.clearDraftOnHotKeyDismiss)
+                }
+                Row(
                     label: String(localized: "askai.row.gpu_power_limit",
                                   defaultValue: "GPU Power Limit",
                                   comment: "Row label for the GPU power limit while Ask AI answers"),

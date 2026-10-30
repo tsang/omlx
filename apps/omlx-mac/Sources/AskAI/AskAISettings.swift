@@ -89,6 +89,10 @@ struct AskAIPrefs: Codable, Equatable, Sendable {
     /// Return sends the prompt and Command-Return inserts a newline.
     /// Off swaps them so Command-Return sends.
     var sendOnEnter = true
+    /// Dismissing the panel with the activation hotkey while the prompt
+    /// still holds text or images arms a one-shot clear: the next activation
+    /// opens an empty prompt.
+    var clearDraftOnHotKeyDismiss = false
 
     init() {}
 
@@ -111,6 +115,8 @@ struct AskAIPrefs: Codable, Equatable, Sendable {
         gpuPowerLimitEnabled = c.lenient(Bool.self, .gpuPowerLimitEnabled) ?? fallback.gpuPowerLimitEnabled
         gpuPowerLimitWatts = c.lenient(Int.self, .gpuPowerLimitWatts) ?? fallback.gpuPowerLimitWatts
         sendOnEnter = c.lenient(Bool.self, .sendOnEnter) ?? fallback.sendOnEnter
+        clearDraftOnHotKeyDismiss = c.lenient(Bool.self, .clearDraftOnHotKeyDismiss)
+            ?? fallback.clearDraftOnHotKeyDismiss
     }
 
     /// The `gpu_power_limit_w` to send, clamped to what the server accepts.

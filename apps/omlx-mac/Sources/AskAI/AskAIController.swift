@@ -45,6 +45,11 @@ final class AskAIController {
     @ObservationIgnored private var modelTypes: [String: String] = [:]
     @ObservationIgnored private var isSubmitting = false
     @ObservationIgnored private var lastClosedAt = Date.distantPast
+    /// The last hide came from the activation hotkey, not Esc or a button.
+    @ObservationIgnored private var closedByHotKey = false
+    /// A hotkey dismiss left the prompt with content while the clear option
+    /// was on; the next showPanel empties it once.
+    @ObservationIgnored private var pendingDraftClear = false
     /// Pastes whose images are still being checked or encoded.
     @ObservationIgnored private var loadingAttachments = 0
     @ObservationIgnored private var submitAfterAttachments = false
@@ -104,6 +109,7 @@ final class AskAIController {
 
     func togglePanel() {
         if isPanelVisible {
+            closedByHotKey = true
             hidePanel()
         } else {
             showPanel()
@@ -112,6 +118,13 @@ final class AskAIController {
 
     func showPanel() {
         guard store.prefs.enabled else { return }
+        let clearDraft = pendingDraftClear && store.prefs.clearDraftOnHotKeyDismiss
+        pendingDraftClear = false
+        if clearDraft {
+            draft = ""
+            attachments.removeAll()
+            submitAfterAttachments = false
+        }
         // Idle time counts from the last send, answer, or close.
         let lastUse = max(conversation.lastActivity, lastClosedAt)
         if !conversation.isStreaming,
@@ -136,6 +149,12 @@ final class AskAIController {
 
     /// Called by the panel controller on every hide, whatever the cause.
     func panelDidHide() {
+        let byHotKey = closedByHotKey
+        closedByHotKey = false
+        if byHotKey, store.prefs.clearDraftOnHotKeyDismiss,
+           !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty {
+            pendingDraftClear = true
+        }
         lastClosedAt = Date()
     }
 

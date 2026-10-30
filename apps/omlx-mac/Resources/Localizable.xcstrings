@@ -33423,6 +33423,54 @@
         }
       }
     },
+    "askai.row.clear_on_reopen" : {
+      "comment" : "Row label for the Ask AI option that empties the prompt when the bar is dismissed with the hotkey while it still has content",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fresh Prompt on Reopen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Новый запрос при повторном открытии"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新打开时清空输入"
+          }
+        }
+      }
+    },
+    "askai.row.clear_on_reopen.sub" : {
+      "comment" : "Sublabel for the Ask AI prompt clearing option",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Closing the bar with the activation hotkey while the prompt still has text or images makes the next activation open an empty one. Escape and buttons keep the draft."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Если закрыть строку горячей клавишей, не отправив текст или изображения, следующее открытие будет пустым. Esc и кнопки черновик сохраняют."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用快捷键关闭时,若输入框仍有文字或图片,下次呼出将显示空白输入框。Esc 和按钮会保留草稿。"
+          }
+        }
+      }
+    },
     "askai.row.new_conversation" : {
       "comment" : "Row label for the idle time that resets the Ask AI conversation",
       "extractionState" : "manual",
