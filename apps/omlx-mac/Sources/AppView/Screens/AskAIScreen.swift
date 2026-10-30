@@ -164,7 +164,7 @@ private struct GeneralSection: View {
                                   defaultValue: "Fresh Prompt on Reopen",
                                   comment: "Row label for the Ask AI option that empties the prompt when the bar is dismissed with the hotkey while it still has content"),
                     sublabel: String(localized: "askai.row.clear_on_reopen.sub",
-                                     defaultValue: "Closing the bar with the activation hotkey while the prompt still has text or images makes the next activation open an empty one. Escape and buttons keep the draft.",
+                                     defaultValue: "Dismissing the bar with the activation hotkey while it holds an unsent prompt, images, or previous answers wipes them, so the next activation opens fresh. Escape and buttons keep everything.",
                                      comment: "Sublabel for the Ask AI prompt clearing option")
                 ) {
                     RowSwitch(isOn: $store.prefs.clearDraftOnHotKeyDismiss)

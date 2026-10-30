@@ -118,12 +118,13 @@ final class AskAIController {
 
     func showPanel() {
         guard store.prefs.enabled else { return }
-        let clearDraft = pendingDraftClear && store.prefs.clearDraftOnHotKeyDismiss
+        let clearAll = pendingDraftClear && store.prefs.clearDraftOnHotKeyDismiss
         pendingDraftClear = false
-        if clearDraft {
+        if clearAll {
             draft = ""
             attachments.removeAll()
             submitAfterAttachments = false
+            conversation.reset()
         }
         // Idle time counts from the last send, answer, or close.
         let lastUse = max(conversation.lastActivity, lastClosedAt)
@@ -152,7 +153,7 @@ final class AskAIController {
         let byHotKey = closedByHotKey
         closedByHotKey = false
         if byHotKey, store.prefs.clearDraftOnHotKeyDismiss,
-           !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty {
+           !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty || !conversation.isEmpty {
             pendingDraftClear = true
         }
         lastClosedAt = Date()

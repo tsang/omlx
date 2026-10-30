@@ -33454,19 +33454,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Closing the bar with the activation hotkey while the prompt still has text or images makes the next activation open an empty one. Escape and buttons keep the draft."
+            "value" : "Dismissing the bar with the activation hotkey while it holds an unsent prompt, images, or previous answers wipes them, so the next activation opens fresh. Escape and buttons keep everything."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Если закрыть строку горячей клавишей, не отправив текст или изображения, следующее открытие будет пустым. Esc и кнопки черновик сохраняют."
+            "value" : "Если закрыть строку горячей клавишей, не отправив запрос, изображения или ответы, они будут удалены, и следующее открытие будет чистым. Esc и кнопки сохраняют всё."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用快捷键关闭时,若输入框仍有文字或图片,下次呼出将显示空白输入框。Esc 和按钮会保留草稿。"
+            "value" : "使用快捷键关闭时,若框内还有未发送的提问、图片或已回答内容,它们将被清除,下次呼出显示全新空白输入框。Esc 和按钮会保留所有内容。"
           }
         }
       }
