@@ -167,6 +167,68 @@ def test_window_and_route_order(mma_on):
     assert route(8, 2048, 8192, 8, 128, f16) != "m1_mma"
 
 
+def test_g14_row_windows(mma_on, monkeypatch):
+    # windows measured on M2 Ultra: 5/6/8-bit win from 4 rows; vocab-size
+    # outputs win from 2; 4-bit rows 2..4 stay on the multi-row qmv.
+    monkeypatch.setattr(m1_verify_mma, "_generation", lambda: 14)
+    f16 = mx.float16
+    assert m1_verify_mma.eligible(4, 2048, 4096, 5, 64, f16)
+    assert m1_verify_mma.eligible(4, 2048, 4096, 6, 64, f16)
+    assert m1_verify_mma.eligible(4, 2048, 4096, 8, 64, f16)
+    assert not m1_verify_mma.eligible(4, 2048, 4096, 4, 64, f16)
+    assert m1_verify_mma.eligible(2, 2048, 131072, 6, 64, f16)
+    assert m1_verify_mma.eligible(2, 2048, 131072, 8, 64, f16)
+    assert not m1_verify_mma.eligible(3, 2048, 4096, 8, 64, f16)
+    route = qwen35_verify_qmm._verify_route
+    assert route(4, 5120, 17408, 5, 64, f16) == "m1_mma"
+    assert route(2, 5120, 131072, 8, 64, f16) == "m1_mma"
+
+
+def test_g13_keeps_the_measured_window(mma_on, monkeypatch):
+    monkeypatch.setattr(m1_verify_mma, "_generation", lambda: 13)
+    f16 = mx.float16
+    assert not m1_verify_mma.eligible(4, 2048, 4096, 8, 64, f16)
+    assert not m1_verify_mma.eligible(2, 2048, 131072, 8, 64, f16)
+    assert m1_verify_mma.eligible(5, 2048, 4096, 8, 64, f16)
+
+
+@pytest.mark.parametrize("bits,rows", [(5, 4), (6, 4), (8, 4)])
+def test_mma_g14_row4_matches_reference(mma_on, monkeypatch, bits, rows):
+    monkeypatch.setattr(m1_verify_mma, "_generation", lambda: 14)
+    k, n = 5120, 4096
+    mx.random.seed(rows + n + bits)
+    w, scales, biases = mx.quantize(
+        (mx.random.normal((n, k)) * 0.05).astype(mx.float16), group_size=64, bits=bits
+    )
+    x = mx.random.normal((rows, k)).astype(mx.float16)
+    assert m1_verify_mma.eligible(rows, k, n, bits, 64, mx.float16)
+    out = m1_verify_mma.m1_mma_qmm(x, w, scales, biases, bits=bits)
+    ref = mx.quantized_matmul(
+        x.astype(mx.float32), w, scales.astype(mx.float32),
+        biases.astype(mx.float32), transpose=True, group_size=64, bits=bits,
+    )
+    err = mx.max(mx.abs(out.astype(mx.float32) - ref)).item()
+    assert err <= 5e-3 * mx.max(mx.abs(ref)).item()
+
+
+@pytest.mark.parametrize("bits", [6, 8])
+def test_mma_g14_huge_n_from_two_rows(mma_on, monkeypatch, bits):
+    monkeypatch.setattr(m1_verify_mma, "_generation", lambda: 14)
+    k, n, rows = 2048, 131072, 2
+    mx.random.seed(n + bits)
+    w, scales, biases = mx.quantize(
+        (mx.random.normal((n, k)) * 0.05).astype(mx.float16), group_size=64, bits=bits
+    )
+    x = mx.random.normal((rows, k)).astype(mx.float16)
+    assert m1_verify_mma.eligible(rows, k, n, bits, 64, mx.float16)
+    out = m1_verify_mma.m1_mma_qmm(x, w, scales, biases, bits=bits)
+    ref = mx.quantized_matmul(
+        x.astype(mx.float32), w, scales.astype(mx.float32),
+        biases.astype(mx.float32), transpose=True, group_size=64, bits=bits,
+    )
+    err = mx.max(mx.abs(out.astype(mx.float32) - ref)).item()
+    assert err <= 5e-3 * mx.max(mx.abs(ref)).item()
+
 def test_disabled_when_the_gate_is_off(monkeypatch):
     monkeypatch.setattr(m1_verify_mma, "enabled", lambda: False)
     assert not m1_verify_mma.eligible(8, 2048, 4096, 4, 64, mx.float16)

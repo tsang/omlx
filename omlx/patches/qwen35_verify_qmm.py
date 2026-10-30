@@ -1644,6 +1644,8 @@ def apply_verify_qmm_patch() -> bool:
     _QL_PATCHED = True
     logger.info(
         "MTP verify qmm patch applied (rows 2..6 split-K, 7..8 sg8, 9..24 mma%s)",
-        "; M1: qmv 2..4, mma 5..16" if m1_verify_qmv.enabled() else "",
+        "; M1-class: qmv 2..4, mma %s" % m1_verify_mma.enabled_window_text()
+        if m1_verify_qmv.enabled()
+        else "",
     )
     return True

@@ -28,11 +28,11 @@
 # The weights-as-MMA-operand layout with masked fields against pre-scaled
 # inputs is mlx-dspark's (which credits TensorFold's simd_qmm and llama.cpp's
 # pre-scaled-input dot product). oMLX adds fp16 inputs (mlx-dspark reads bf16
-# bit patterns only), 5-, 6- and 8-bit weights, the applegpu_g13 gate and the verify
-# routing.
-"""Verify-width (5-16 rows) 4-, 5-, 6- and 8-bit quantized matmul on simdgroup matrices, M1.
+# inputs (mlx-dspark reads bf16 bit patterns only), 5-, 6- and 8-bit weights, the applegpu_g13/g14 gate and the
+# verify routing.
+"""Verify-width (2-16 rows on applegpu_g14, 5-16 on g13) 4-, 5-, 6- and 8-bit matmul on simdgroup matrices.
 
-Speculative verify on M1 multiplies 5-16 rows against every projection; the
+Speculative verify on M1/M2 multiplies 5-16 rows against every projection; the
 multi-row qmv (``m1_verify_qmv``) stops paying from 5 rows, and sg8 / mma land
 at ~2x the one-row decode time there. This kernel computes ``C = W X^T`` on
 the 8x8 ``simdgroup_matrix`` units with the WEIGHTS as operand A: each lane
@@ -88,7 +88,18 @@ End to end, Qwen3.6-35B-A3B with DFlash (block 6, fixed verify), decode
 tok/s: packs with 6-bit group-64 projections +18% to +24%; a pack whose only
 6/8-bit group-64 weights are the lm_head and four attention layers is flat.
 
-Gating: applegpu_g13 only (where it was measured).
+Measured on M2 Ultra (g14, fp16; gain of this kernel over stock
+quantized_matmul at the same shape):
+
+    lm_head 2048x248320 8-bit  +38% (2 rows)  +56% (3)  +68% (4)  +72% (5)  +71% (8)  +34% (16)
+    lm_head 2048x248320 6-bit  +17% (2)       +42% (3)   +56% (4)
+    8192x4096        8-bit      +40% (2)       +3% (3)    +3% (4)  +18% (5)  +26% (8)  +25% (16)
+    8192x4096        6-bit                                         +29% (5)  +34% (8)  +19% (16)
+
+Gating: applegpu_g13 keeps the 5..16 window above; g14 routes 5/6/8-bit
+from 4 rows and 6/8-bit from 2 rows at N >= 65536 (mid-shape gains below
+4 rows are inside launch noise; 4-bit rows 2..4 stay on the multi-row qmv,
+which measures faster there).
 """
 
 from __future__ import annotations
@@ -101,9 +112,16 @@ logger = logging.getLogger(__name__)
 
 GROUP = 64
 RT_MAX = 2  # 8-row tiles per threadgroup (16 rows)
-# Measured window on M1 Max (4/5/6/8-bit, 5-16 rows).
+# Measured window on M1 Max (4/5/6/8-bit, 5-16 rows). g14 (M2 family)
+# measured lower floors: 5/6/8-bit win from 4 rows on mid-size shapes, and
+# vocab-size outputs (N >= 65536, the lm_head) win from 2 rows; the numerics
+# at those rows were verified against an fp32 reference on M2 Ultra (max rel
+# err 4e-4). 4-bit rows 2..4 stay the multi-row qmv's.
 MIN_ROWS = 5
 MAX_ROWS = 16
+_LO_ROWS = {14: {5: 4, 6: 4, 8: 4}}
+_HUGE_N = 65536
+_HUGE_N_ROWS = {14: {6: 2, 8: 2}}
 # Small outputs (GDN a/b heads) stay on the stock path.
 _MIN_N = 1024
 
@@ -340,15 +358,39 @@ def _source(bits: int) -> str:
         src = src.replace(marker, text.strip("\n"))
     return src
 
+@cache
+def _generation() -> int:
+    from omlx.utils.hardware import get_apple_gpu_generation
+
+    return get_apple_gpu_generation()
+
+
+def _min_rows(bits: int, n: int) -> int:
+    """Lowest row count this (bit width, output size) wins at per GPU."""
+    gen = _generation()
+    if int(n) >= _HUGE_N:
+        lo = _HUGE_N_ROWS.get(gen)
+        if lo and int(bits) in lo:
+            return lo[int(bits)]
+    lo = _LO_ROWS.get(gen)
+    if lo and int(bits) in lo:
+        return lo[int(bits)]
+    return MIN_ROWS
+
+
+def enabled_window_text() -> str:
+    lo = _LO_ROWS.get(_generation())
+    if not lo:
+        return f"{MIN_ROWS}..{MAX_ROWS}"
+    return f"5/6/8-bit 4..{MAX_ROWS}, huge-N 2..{MAX_ROWS}, 4-bit 5..{MAX_ROWS}"
+
 
 @cache
 def enabled() -> bool:
-    from omlx.utils.hardware import get_apple_gpu_generation
-
-    on = get_apple_gpu_generation() == 13
+    on = _generation() in (13, 14)
     if on:
         logger.info(
-            "M1 verify MMA enabled (4/5/6/8-bit rows %d..%d)", MIN_ROWS, MAX_ROWS
+            "M1-class verify MMA enabled (4/5/6/8-bit rows %s)", enabled_window_text()
         )
     return on
 
@@ -359,7 +401,7 @@ def eligible(M: int, K: int, N: int, bits: int, group_size: int, dtype) -> bool:
     if int(bits) not in _UNPACK or not enabled():
         return False
     return (
-        MIN_ROWS <= int(M) <= MAX_ROWS
+        _min_rows(int(bits), int(N)) <= int(M) <= MAX_ROWS
         and int(group_size) == GROUP
         and dtype in (mx.float16, mx.bfloat16)
         and int(K) % GROUP == 0

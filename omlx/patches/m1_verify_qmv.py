@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Multi-row verify qmv for pre-NAX Apple GPUs (M1 class).
+"""Multi-row verify qmv for pre-NAX Apple GPUs (M1/M2 class).
 
 Speculative verify multiplies a skinny row batch (M = 1 + draft depth)
-against the quantized weights. On applegpu_g13 (M1 / M1 Pro / Max / Ultra)
+against the quantized weights. On applegpu_g13/g14 (M1 family / M2 family)
 stock MLX re-runs its one-row ``qmv`` per row, so time grows linearly with M,
 and the split-K / sg8 verify kernels tuned on M3 Ultra land at ~165 GB/s. At
 M = 2..4 these GPUs are limited by ALU and by re-reading the input rows, not
@@ -27,7 +27,8 @@ Numerics: fp32 accumulation, per-group ``scale * sum(x*q) + bias * sum(x)``
 like qmv. Rows are not bit-identical to the one-row decode (same class as the
 other verify kernels); row-exact verify models never get here.
 
-Gating: applegpu_g13 only (where it was measured).
+Gating: applegpu_g13/g14 (timings measured on M1 Max; the qmv layout and
+bit-width arithmetic are generation-independent, numerics verified on g14).
 """
 
 from __future__ import annotations
@@ -56,9 +57,9 @@ _MIN_N = 1024
 def enabled() -> bool:
     from omlx.utils.hardware import get_apple_gpu_generation
 
-    on = get_apple_gpu_generation() == 13
+    on = get_apple_gpu_generation() in (13, 14)
     if on:
-        logger.info("M1 verify qmv enabled (4-bit rows 2..4, 5-bit rows 2..3)")
+        logger.info("M1-class verify qmv enabled (4-bit rows 2..4, 5-bit rows 2..3)")
     return on
 
 
