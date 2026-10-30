@@ -47,6 +47,17 @@ jobs:
       - name: Install venvstacks
         run: python -m pip install --upgrade pip "venvstacks>=0.7.0"
 
+      - name: Install custom-kernel toolchain
+        if: inputs.custom_kernels
+        run: |
+          # setup.py build_ext runs without pip isolation; nanobind must be
+          # importable by PYTHON_BIN and match the pyproject [build-system]
+          # pin (MLX 0.32.4's ABI; a mismatch isolates the mlx NB_DOMAIN,
+          # issue #2139). cmake/ninja ship on the macOS runner image.
+          PIN="$(sed -n 's/^[[:space:]]*"nanobind==\([0-9][0-9.]*\)".*/\1/p' pyproject.toml | head -1)"
+          python -m pip install "nanobind==$PIN"
+          python -c 'import nanobind; print("nanobind", nanobind.__version__)'
+
       - name: Build app bundle
         env:
           MACOSX_DEPLOYMENT_TARGET: "15.0"
