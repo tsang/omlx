@@ -10,11 +10,12 @@ from omlx.cache.paged_ssd_cache import (
     numerics_revision_for_model,
 )
 from omlx.models.vlm import VLMModelAdapter
+from omlx.patches.deepseek_v41.cache import DeepseekV41Cache
 from omlx.patches.deepseek_v41.language import Attention
 from omlx.patches.deepseek_v41.model import Model
 
 
-def make_model(mtp=False):
+def make_model(mtp=False, targets=(3, 4, 5), **config):
     kwargs = {}
     if mtp:
         kwargs = dict(
@@ -22,13 +23,13 @@ def make_model(mtp=False):
             n_mtp_layers=3,
             dspark_block_size=3,
             dspark_noise_token_id=2,
-            dspark_target_layer_ids=(3, 4, 5),
+            dspark_target_layer_ids=targets,
             dspark_n_routed_experts=2,
             dspark_n_activated_experts=1,
             dspark_markov_rank=32,
             compress_ratios=(0, 2, 2, 1, 1, 1, 0, 0, 0),
         )
-    model = Model(tiny_ced(**kwargs))
+    model = Model(tiny_ced(**kwargs, **config))
     load_reference_weights(model.language_model)
     model.language_model.configure_mtp(mtp, 3)
     return model
@@ -59,6 +60,86 @@ def test_short_suffix_preserves_positions_and_window(suffix, monkeypatch):
         assert a[1].shape[1] == 4
         for x, y in zip(a.cache, b.cache):
             np.testing.assert_array_equal(x, y)
+
+
+@pytest.mark.parametrize("follow", [7, 2])
+def test_skipped_decoder_tail_matches_running_it(follow):
+    """A cache-only chunk announced to be followed by another stops at the
+    midpoint. A longer next chunk replaces the decoder windows; a shorter one
+    than announced replays them. Later outputs and caches match running the
+    decoder."""
+    model = make_model().language_model
+    first = mx.array([[5, 9, 3, 12, 20, 7, 4]])
+    nxt = mx.array([[8, 2, 11, 6, 13, 10, 1][:follow]])
+    skipped, baseline = model.make_cache(), model.make_cache()
+    model._omlx_prefill(first, cache=skipped, next_prefill_tokens=7)
+    model._omlx_prefill(first, cache=baseline)
+    assert skipped[3].has_pending() and not baseline[3].has_pending()
+    model._omlx_prefill(nxt, cache=skipped)
+    model._omlx_prefill(nxt, cache=baseline)
+    assert not skipped[3].has_pending()
+    token = mx.array([[30]])
+    np.testing.assert_array_equal(
+        model(token, cache=skipped), model(token, cache=baseline)
+    )
+    for a, b in zip(skipped, baseline):
+        assert len(a.cache) == len(b.cache) == 7
+        for x, y in zip(a.cache, b.cache):
+            np.testing.assert_array_equal(x, y)
+
+
+@pytest.mark.parametrize("follow", [7, 2])
+def test_skipped_decoder_tail_keeps_dspark_priming(follow):
+    """With every DSpark target after the midpoint, a skipped chunk captures
+    nothing and a replay captures its window, so the draft context matches."""
+    model = make_model(mtp=True, targets=(4, 5)).language_model
+    first = mx.array([[5, 9, 3, 12, 20, 7, 4]])
+    nxt = mx.array([[8, 2, 11, 6, 13, 10, 1][:follow]])
+    runs = []
+    for announced in (7, 0):
+        cache = model.make_cache()
+        model._omlx_prefill(first, cache=cache, next_prefill_tokens=announced)
+        assert cache[3].has_pending() == bool(announced)
+        model._omlx_prefill(nxt, cache=cache)
+        context = model._omlx_mtp_prime_ctx
+        offset = context.expected_target_offset
+        keys = [np.asarray(c.keys.astype(mx.float32)) for c in context.caches]
+        logits = np.asarray(model(mx.array([[30]]), cache=cache))
+        runs.append((offset, keys, logits))
+    (offset, keys, logits), (expected_offset, expected_keys, expected) = runs
+    assert offset == expected_offset == 7 + follow
+    for a, b in zip(keys, expected_keys):
+        np.testing.assert_array_equal(a, b)
+    np.testing.assert_array_equal(logits, expected)
+
+
+def test_dspark_drafts_keep_the_a16_path():
+    model = make_model(mtp=True, a8_prefill=True).language_model
+    assert model.layers[1].ffn._a8_min_tokens == 128
+    assert model.mtp[0].ffn._a8_min_tokens is None
+
+
+def test_pending_replay_survives_single_row_batches():
+    """A one-row batch keeps the replay slots through a write; a write to a
+    mixed batch would drop them, so it is refused."""
+    pending = DeepseekV41Cache(1)
+    pending.cache = [mx.array([4], mx.int32)] + [None] * 6
+    pending.set_pending(
+        (
+            mx.zeros((1, 2, 4, 8)),
+            mx.zeros((1, 2, 4)),
+            mx.zeros((1, 2, 3), mx.int32),
+            mx.zeros((1, 2, 0), mx.int32),
+        )
+    )
+    batch = DeepseekV41Cache.merge([pending])
+    batch[0] = mx.array([4], mx.int32)
+    assert batch.has_pending() and len(batch.pending()) == 4
+    plain = DeepseekV41Cache(1)
+    plain.cache = [mx.array([3], mx.int32)] + [None] * 6
+    mixed = DeepseekV41Cache.merge([pending, plain])
+    with pytest.raises(ValueError, match="cannot be batched"):
+        mixed[0] = mx.array([4, 3], mx.int32)
 
 
 def test_scoring_and_explicit_capture_are_full_depth():

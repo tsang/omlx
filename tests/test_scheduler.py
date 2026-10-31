@@ -345,9 +345,12 @@ class TestSchedulerInitialization:
 
         assert scheduler.config.max_num_seqs == 64
 
-    def test_llama4_effective_cap_is_serial(self, mock_model, mock_tokenizer):
-        """Llama 4 uses ChunkedKVCache layers that are serialized for now."""
-        mock_model.config.model_type = "llama4"
+    @pytest.mark.parametrize("model_type", ["llama4", "unlimited-ocr"])
+    def test_serial_model_effective_cap_is_one(
+        self, mock_model, mock_tokenizer, model_type
+    ):
+        """Llama 4 and Unlimited-OCR caches cannot join a multi-row batch."""
+        mock_model.config.model_type = model_type
         scheduler = Scheduler(
             model=mock_model,
             tokenizer=mock_tokenizer,
@@ -355,6 +358,24 @@ class TestSchedulerInitialization:
         )
 
         assert scheduler._effective_max_num_seqs() == 1
+
+    def test_serial_model_type_reads_module_attributes(self):
+        """nn.Module subclasses dict, so model_type is read as an attribute."""
+        import mlx.nn as nn
+
+        class Llama4(nn.Module):  # mlx-lm Model keeps its ModelArgs as .args
+            def __init__(self):
+                super().__init__()
+                self.args = SimpleNamespace(model_type="llama4")
+
+        class Adapter(nn.Module):  # VLMModelAdapter exposes the VLM config
+            @property
+            def config(self):
+                return SimpleNamespace(model_type="unlimited-ocr")
+
+        assert scheduler_module._serial_model_type(Llama4()) == "llama4"
+        assert scheduler_module._serial_model_type(Adapter()) == "unlimited-ocr"
+        assert scheduler_module._serial_model_type(nn.Linear(2, 2)) is None
 
     def test_init_falls_back_when_paged_ssd_cache_unavailable(
         self, mock_model, mock_tokenizer, tmp_path, monkeypatch, caplog
@@ -4934,6 +4955,23 @@ class TestPeriodicClearGating:
         scheduler._memory_limit_bytes = 0
         assert scheduler._periodic_clear_threshold_bytes() == 2 * 1024**3
 
+    def test_early_kv_growth_waits_for_the_deferred_clear(
+        self, mock_model, mock_tokenizer, monkeypatch
+    ):
+        """One early-grown bank at a time: the next waits for the #435-delayed clear."""
+        from omlx.patches import vlm_batch_kv_capacity as capacity
+
+        monkeypatch.setattr(capacity, "_early_growth", {"allowed": False, "grown": True})
+        scheduler = Scheduler(model=mock_model, tokenizer=mock_tokenizer)
+        scheduler._pace_early_kv_growth()
+        assert scheduler._deferred_clear_at == (
+            scheduler._step_counter + Scheduler._DEFERRED_CLEAR_DELAY
+        )
+        assert capacity._early_growth == {"allowed": False, "grown": False}
+        scheduler._deferred_clear_at = None
+        scheduler._pace_early_kv_growth()
+        assert capacity._early_growth["allowed"] is True
+
 
 class TestExtractCacheStatesCacheList:
     """Tests for CacheList handling in _extract_cache_states."""
@@ -7341,7 +7379,8 @@ class TestOutputParserSmoke:
         assert outputs[-1].new_token_ids == []
         assert outputs[-1].output_token_ids == []
 
-    def test_parser_stop_sets_finish_reason(self, mock_model):
+    @pytest.mark.parametrize("ignore_eos", [False, True])
+    def test_parser_stop_sets_finish_reason(self, mock_model, ignore_eos):
         tokenizer = self._GemmaTokenizer({11: "<|return|>"})
         scheduler = Scheduler(
             model=mock_model,
@@ -7353,7 +7392,7 @@ class TestOutputParserSmoke:
         request = Request(
             request_id="parser-stop-req",
             prompt="prompt",
-            sampling_params=SamplingParams(max_tokens=5),
+            sampling_params=SamplingParams(max_tokens=5, ignore_eos=ignore_eos),
             prompt_token_ids=[1, 2, 3],
             num_prompt_tokens=3,
             status=RequestStatus.RUNNING,
@@ -7365,14 +7404,21 @@ class TestOutputParserSmoke:
         scheduler.request_id_to_uid[request.request_id] = 99
 
         responses = [
-            type("Resp", (), {"uid": 99, "token": 11, "finish_reason": None})(),
+            type("Resp", (), {"uid": 99, "token": token, "finish_reason": None})()
+            for token in (11, 12)
         ]
 
         outputs, finished_ids = scheduler._process_batch_responses(responses)
 
-        assert finished_ids == {"parser-stop-req"}
-        assert outputs[-1].finished is True
-        assert outputs[-1].finish_reason == "stop"
+        if ignore_eos:
+            # The latched parser stop neither ends the row nor drops tokens.
+            assert finished_ids == set()
+            assert outputs[-1].finished is False
+            assert request.output_token_ids == [11, 12]
+        else:
+            assert finished_ids == {"parser-stop-req"}
+            assert outputs[-1].finished is True
+            assert outputs[-1].finish_reason == "stop"
 
     def test_deepseek_v4_tool_block_end_stops_batch_row(self, mock_model):
         mock_model.config.model_type = "deepseek_v4"
@@ -9127,6 +9173,36 @@ def test_external_prefill_keeps_image_prefix_atomic(mock_model, mock_tokenizer):
     assert [
         c.args[2] for c in scheduler._emit_prefill_boundary_snapshot.call_args_list
     ] == [8, 12]
+
+
+def test_external_prefill_keeps_full_chunks_without_snapshots(
+    mock_model, mock_tokenizer
+):
+    """Layouts the prefix cache never stores are not cut at block boundaries."""
+    from mlx_vlm.models.cache import RotatingKVCache
+
+    scheduler = Scheduler(
+        model=mock_model,
+        tokenizer=mock_tokenizer,
+        config=SchedulerConfig(prefill_step_size=8, paged_cache_block_size=4),
+    )
+    scheduler.block_aware_cache = MagicMock()
+    scheduler._model_has_unreconstructible_cache = lambda: True
+    request = Request(
+        request_id="no-snapshots",
+        prompt=list(range(13)),
+        sampling_params=SamplingParams(),
+    )
+    request.prompt_token_ids = list(range(13))
+    request.num_prompt_tokens = 13
+    request.benchmark_trace = True
+    scheduler._do_external_prefill(
+        request,
+        request.prompt_token_ids,
+        [RotatingKVCache(max_size=16)],
+        vlm_embeds=(mx.zeros((1, 13, 8)), {}, 0),
+    )
+    assert request.benchmark_prefill_chunks == [8, 4]
 
 
 @pytest.mark.parametrize("on_ssd", [True, False])

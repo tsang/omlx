@@ -360,6 +360,13 @@ _NUMERICS_REVISIONS = {
     # mlx-lm's Muse Spark keeps the residual stream in FP32; oMLX's own model
     # served Muse Spark before and kept it in BF16.
     "mlx_lm.models.muse_spark": "upstream-1",
+    # mlx-vlm 138d761 changes the DeepSeek-OCR SAM and CLIP encoders (also
+    # used by DeepSeek-OCR 2 and Unlimited-OCR), the MiniCPM-V 4.6/4.7 vision
+    # tower, and per-expert NVFP4 MoE matmuls (gather_qmm global_scale).
+    "mlx_vlm.models.deepseekocr.sam": "mlx-vlm-138d761",
+    "mlx_vlm.models.deepseekocr.vision": "mlx-vlm-138d761",
+    "mlx_vlm.models.minicpmv4_6.vision": "mlx-vlm-138d761",
+    "mlx_vlm.quantization.nvfp4": "mlx-vlm-138d761",
 }
 
 
@@ -5417,13 +5424,18 @@ class PagedSSDCacheManager(CacheManager):
             return False
 
         with self._lock:
-            indexed_entries = [
+            # Same files as _tracked_ssd_size(): blocks in an older layout and
+            # sidecars are never read back but still fill the SSD budget.
+            tracked_entries = [
                 metadata
-                for metadata in self._index.get_all_metadata()
+                for metadata in (
+                    *self._index.get_all_metadata(),
+                    *self._incompatible_index.get_all_metadata(),
+                    *self._gdn_sidecar_index.get_all_metadata(),
+                )
                 if _matches(metadata.model_name)
             ]
-            indexed_size = sum(metadata.file_size for metadata in indexed_entries)
-            indexed_count = len(indexed_entries)
+            tracked_size = sum(metadata.file_size for metadata in tracked_entries)
 
             with self._hot_cache_lock:
                 hot_entries = []
@@ -5444,10 +5456,10 @@ class PagedSSDCacheManager(CacheManager):
                 loads=self._stats["loads"],
                 errors=self._stats["errors"],
                 evict_unlink_failures=self._stats["evict_unlink_failures"],
-                total_size_bytes=indexed_size,
+                total_size_bytes=tracked_size,
                 max_size_bytes=self._get_effective_max_size(),
                 configured_max_size_bytes=self._max_size,
-                num_files=indexed_count,
+                num_files=len(tracked_entries),
                 hot_cache_entries=len(hot_entries),
                 hot_cache_size_bytes=hot_size,
                 hot_cache_max_bytes=self._effective_hot_cache_max_bytes(),
