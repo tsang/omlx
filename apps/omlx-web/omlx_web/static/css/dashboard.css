@@ -1584,3 +1584,25 @@
         border-radius: 2px 2px 0 0;
         background-color: rgb(var(--palette-green-600));
     }
+
+/* Active-request sub-rows (prefill / generating / activity / waiting):
+   one shared column template so every row lines up — id, ip, preview,
+   status, elapsed, metrics. Long cells truncate; full text is on the
+   title tooltip. Preview is the only flexible column. */
+.req-row {
+    display: grid;
+    grid-template-columns: 4rem 6.5rem minmax(0, 1fr) 9.5rem 4rem minmax(0, 12rem);
+    column-gap: 1rem;
+    align-items: center;
+}
+.req-row > * {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.req-row > .req-metrics {
+    width: 100%;
+    text-align: right;
+    color: rgb(163 163 163); /* neutral-400 */
+}
