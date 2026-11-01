@@ -142,7 +142,9 @@ final class AskAIController {
         guard store.prefs.enabled else { return }
         let clearAll = pendingDraftClear && store.prefs.clearDraftOnHotKeyDismiss
         pendingDraftClear = false
-        if clearAll {
+        // A live exchange is not a dismiss to undo: while an answer streams
+        // (even in the background) or a submit is queued, keep everything.
+        if clearAll, !conversation.isStreaming, !isSubmitting, !submitAfterAttachments {
             draft = ""
             attachments.removeAll()
             submitAfterAttachments = false
@@ -177,6 +179,7 @@ final class AskAIController {
         let byHotKey = closedByHotKey
         closedByHotKey = false
         if byHotKey, store.prefs.clearDraftOnHotKeyDismiss,
+           !conversation.isStreaming, !isSubmitting, !submitAfterAttachments,
            !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty || !conversation.isEmpty {
             pendingDraftClear = true
         }
