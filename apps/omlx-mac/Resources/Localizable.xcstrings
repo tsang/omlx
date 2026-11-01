@@ -33471,6 +33471,54 @@
         }
       }
     },
+    "askai.row.clear_on_reopen" : {
+      "comment" : "Row label for the Ask AI option that empties the prompt when the bar is dismissed with the hotkey while it still has content",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fresh Prompt on Reopen"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Новый запрос при повторном открытии"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新打开时清空输入"
+          }
+        }
+      }
+    },
+    "askai.row.clear_on_reopen.sub" : {
+      "comment" : "Sublabel for the Ask AI prompt clearing option",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dismissing the bar with the activation hotkey while it holds an unsent prompt, images, or previous answers wipes them, so the next activation opens fresh. Escape and buttons keep everything."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Если закрыть строку горячей клавишей, не отправив запрос, изображения или ответы, они будут удалены, и следующее открытие будет чистым. Esc и кнопки сохраняют всё."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用快捷键关闭时,若框内还有未发送的提问、图片或已回答内容,它们将被清除,下次呼出显示全新空白输入框。Esc 和按钮会保留所有内容。"
+          }
+        }
+      }
+    },
     "askai.row.new_conversation" : {
       "comment" : "Row label for the idle time that resets the Ask AI conversation",
       "extractionState" : "manual",

@@ -189,6 +189,10 @@ struct AskAIPrefs: Codable, Equatable, Sendable {
     /// Return sends and Shift-Return inserts the newline. Command-Return
     /// sends either way.
     var sendOnEnter = false
+    /// Dismissing the panel with the activation hotkey while the prompt
+    /// still holds text or images arms a one-shot clear: the next activation
+    /// opens an empty prompt.
+    var clearDraftOnHotKeyDismiss = false
 
     init() {}
 
@@ -219,6 +223,8 @@ struct AskAIPrefs: Codable, Equatable, Sendable {
             if talk.systemPrompt.isEmpty { talk.systemPrompt = TalkPrefs.defaultPrompt }
             promptDefaultsApplied = true
         }
+        clearDraftOnHotKeyDismiss = c.lenient(Bool.self, .clearDraftOnHotKeyDismiss)
+            ?? fallback.clearDraftOnHotKeyDismiss
     }
 
     var requestGPUPowerLimit: Int? {

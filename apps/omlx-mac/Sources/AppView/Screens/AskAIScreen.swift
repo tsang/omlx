@@ -309,6 +309,16 @@ private struct TextAdvancedSection: View {
                                      comment: "Ask AI option: new conversation after 15 idle minutes")),
                     ])
                 }
+                Row(
+                    label: String(localized: "askai.row.clear_on_reopen",
+                                  defaultValue: "Fresh Prompt on Reopen",
+                                  comment: "Row label for the Ask AI option that empties the prompt when the bar is dismissed with the hotkey while it still has content"),
+                    sublabel: String(localized: "askai.row.clear_on_reopen.sub",
+                                     defaultValue: "Dismissing the bar with the activation hotkey while it holds an unsent prompt, images, or previous answers wipes them, so the next activation opens fresh. Escape and buttons keep everything.",
+                                     comment: "Sublabel for the Ask AI prompt clearing option")
+                ) {
+                    RowSwitch(isOn: $store.prefs.clearDraftOnHotKeyDismiss)
+                }
                 Row(label: AskAIScreenStrings.thinking, sublabel: AskAIScreenStrings.thinkingSub) {
                     RowSwitch(isOn: $store.prefs.defaultAllowThinking)
                 }
